@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>PIM-AI – Feature Deep Dive</title>
+<style>
+  @media print {
+    .no-print { display: none; }
+    .page { box-shadow: none; margin: 0; border-radius: 0; }
+    .feature-section { page-break-inside: avoid; }
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Georgia, 'Times New Roman', serif; background: #f4f4f1; color: #1a1a1a; }
+  .page { max-width: 900px; margin: 2rem auto; background: #fff; border-radius: 4px; box-shadow: 0 2px 16px rgba(0,0,0,0.08); padding: 4rem 5rem; }
+  .no-print { text-align: right; max-width: 900px; margin: 1rem auto; }
+  .no-print button { font-family: Georgia, serif; font-size: 13px; padding: 8px 20px; border: 1px solid #999; border-radius: 4px; background: #fff; cursor: pointer; }
+  .no-print button:hover { background: #f0f0ec; }
+
+  .cover-tag { font-family: Arial, sans-serif; font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: #888; margin-bottom: 1rem; }
+  .cover-title { font-size: 32px; font-weight: normal; color: #111; line-height: 1.2; margin-bottom: .5rem; }
+  .cover-sub { font-size: 15px; color: #555; margin-bottom: 1.5rem; line-height: 1.7; }
+  .cover-meta { font-family: Arial, sans-serif; font-size: 12px; color: #aaa; border-top: 1px solid #e0e0e0; padding-top: 1rem; display: flex; gap: 2rem; flex-wrap: wrap; }
+  .divider { border: none; border-top: 1px solid #e4e4e0; margin: 2.5rem 0; }
+
+  .toc { background: #f8f8f5; border: 1px solid #e4e4e0; border-radius: 4px; padding: 1.25rem 1.5rem; margin-bottom: 2rem; }
+  .toc-title { font-family: Arial, sans-serif; font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: #888; margin-bottom: .75rem; }
+  .toc-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px 2rem; }
+  .toc-item { font-family: Arial, sans-serif; font-size: 13px; color: #555; padding: 3px 0; border-bottom: .5px dotted #ddd; }
+  .toc-num { color: #bbb; margin-right: 6px; }
+
+  .feature-section { margin-bottom: 3rem; }
+  .feature-header { display: flex; align-items: flex-start; gap: 1rem; margin-bottom: 1.5rem; }
+  .feature-number { font-family: Arial, sans-serif; font-size: 28px; font-weight: 300; color: #ccc; min-width: 48px; line-height: 1; padding-top: 4px; }
+  .feature-header-text {}
+  .feature-category { font-family: Arial, sans-serif; font-size: 10px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: #999; margin-bottom: .3rem; }
+  .feature-name { font-size: 22px; font-weight: normal; color: #111; line-height: 1.2; }
+
+  .three-col { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 1rem; }
+  .col-block { border-radius: 4px; padding: 1.1rem 1.25rem; }
+  .col-block.challenge { background: #fff5f5; border: 1px solid #f0d0d0; }
+  .col-block.resolution { background: #f2faf5; border: 1px solid #c8e8d4; }
+  .col-block.benefit { background: #f4f2fd; border: 1px solid #d4cef5; }
+  .col-label { font-family: Arial, sans-serif; font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; margin-bottom: .6rem; }
+  .col-block.challenge .col-label { color: #c0392b; }
+  .col-block.resolution .col-label { color: #1e7e4a; }
+  .col-block.benefit .col-label { color: #5340b8; }
+  .col-block ul { margin-left: 1rem; }
+  .col-block ul li { font-size: 13px; line-height: 1.65; color: #333; margin-bottom: .3rem; }
+
+  .impact-bar { display: flex; gap: 8px; flex-wrap: wrap; margin-top: .75rem; }
+  .impact-pill { font-family: Arial, sans-serif; font-size: 11px; padding: 3px 10px; border-radius: 99px; }
+  .pill-red { background: #fff0f0; border: 1px solid #f0d0d0; color: #a93226; }
+  .pill-green { background: #f0fbf4; border: 1px solid #bce0cc; color: #1a6b3c; }
+  .pill-purple { background: #f2f0fd; border: 1px solid #d0c8f0; color: #4a3aaa; }
+
+  .footer { font-family: Arial, sans-serif; font-size: 11px; color: #bbb; text-align: center; margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid #e8e8e4; }
+</style>
+</head>
+<body>
+
+<div class="no-print">
+  <button onclick="window.print()">Print / Save as PDF</button>
+</div>
+
+<div class="page">
+
+  <div class="cover-tag">Feature Analysis Document</div>
+  <div class="cover-title">PIM-AI — Feature Deep Dive</div>
+  <div class="cover-sub">For each of PIM-AI's eight core features, this document outlines the business challenge it addresses, how the feature resolves it, and the measurable benefits for business users.</div>
+  <div class="cover-meta">
+    <span>Version 1.0</span>
+    <span>April 2026</span>
+    <span>Audience: Business Stakeholders &amp; Executives</span>
+  </div>
+
+  <hr class="divider">
+
+  <div class="toc">
+    <div class="toc-title">Contents</div>
+    <div class="toc-grid">
+      <div class="toc-item"><span class="toc-num">01</span>Product Description Generator</div>
+      <div class="toc-item"><span class="toc-num">02</span>Auto Product Tagging</div>
+      <div class="toc-item"><span class="toc-num">03</span>Auto Classification</div>
+      <div class="toc-item"><span class="toc-num">04</span>Image Sequencing</div>
+      <div class="toc-item"><span class="toc-num">05</span>Image Quality Enhancement</div>
+      <div class="toc-item"><span class="toc-num">06</span>Image-to-Product Data</div>
+      <div class="toc-item"><span class="toc-num">07</span>Product Data Enrichment</div>
+      <div class="toc-item"><span class="toc-num">08</span>Agentic Commerce</div>
+    </div>
+  </div>
+
+  <!-- FEATURE 01 -->
+  <div class="feature-section">
+    <div class="feature-header">
+      <div class="feature-number">01</div>
+      <div class="feature-header-text">
+        <div class="feature-category">AI Writing</div>
+        <div class="feature-name">Product Description Generator</div>
+      </div>
+    </div>
+    <div class="three-col">
+      <div class="col-block challenge">
+        <div class="col-label">Business Challenge</div>
+        <ul>
+          <li>Writing descriptions for thousands of SKUs requires large copywriting teams</li>
+          <li>Inconsistent tone and quality across categories and channels</li>
+          <li>New product launches delayed waiting for content approval</li>
+          <li>SEO is deprioritised due to time pressure, hurting organic traffic</li>
+          <li>High cost of external agencies for seasonal catalog refreshes</li>
+        </ul>
+      </div>
+      <div class="col-block resolution">
+        <div class="col-label">How PIM-AI Resolves It</div>
+        <ul>
+          <li>Auto-generates titles and descriptions from attributes and images in seconds</li>
+          <li>Brand voice and tone configured once, applied consistently at scale</li>
+          <li>SEO keywords embedded automatically based on category signals</li>
+          <li>Drafts ready for review — human effort shifts from writing to approving</li>
+          <li>Multi-language output removes translation bottleneck</li>
+        </ul>
+      </div>
+      <div class="col-block benefit">
+        <div class="col-label">Business Benefits</div>
+        <ul>
+          <li>80%+ reduction in content production time</li>
+          <li>Lower copywriting and agency costs</li>
+          <li>Consistent brand voice across all channels</li>
+          <li>Improved organic search rankings and traffic</li>
+          <li>Faster product launches with no content backlog</li>
+        </ul>
+      </div>
+    </div>
+    <div class="impact-bar">
+      <span class="impact-pill pill-red">Pain: Content bottleneck &amp; high cost</span>
+      <span class="impact-pill pill-green">Fix: AI drafts, humans approve</span>
+      <span class="impact-pill pill-purple">Gain: Speed, SEO, brand consistency</span>
+    </div>
+  </div>
+
+  <hr class="divider">
+
+  <!-- FEATURE 02 -->
+  <div class="feature-section">
+    <div class="feature-header">
+      <div class="feature-number">02</div>
+      <div class="feature-header-text">
+        <div class="feature-category">Vision AI</div>
+        <div class="feature-name">Auto Product Tagging</div>
+      </div>
+    </div>
+    <div class="three-col">
+      <div class="col-block challenge">
+        <div class="col-label">Business Challenge</div>
+        <ul>
+          <li>Merchandisers manually assign tags to every product — a slow, error-prone task</li>
+          <li>Inconsistent tagging leads to poor search and filter results for customers</li>
+          <li>New supplier products arrive with minimal or no attribute data</li>
+          <li>Missing tags cause products to be invisible in filtered browsing</li>
+          <li>Scaling the catalog means the problem compounds rapidly</li>
+        </ul>
+      </div>
+      <div class="col-block resolution">
+        <div class="col-label">How PIM-AI Resolves It</div>
+        <ul>
+          <li>Vision AI analyses product images to extract colour, material, style, shape</li>
+          <li>Combines image and text signals for high-confidence tagging</li>
+          <li>Maps tags to your existing attribute schema automatically</li>
+          <li>Low-confidence tags routed for human review only</li>
+          <li>Runs across entire catalog in batch — no manual queue</li>
+        </ul>
+      </div>
+      <div class="col-block benefit">
+        <div class="col-label">Business Benefits</div>
+        <ul>
+          <li>Up to 80% reduction in manual tagging effort</li>
+          <li>Customers find products faster — lower bounce rate</li>
+          <li>Higher add-to-cart from improved filter accuracy</li>
+          <li>Merchandiser time freed for strategic work</li>
+          <li>Consistent attribute coverage across all SKUs</li>
+        </ul>
+      </div>
+    </div>
+    <div class="impact-bar">
+      <span class="impact-pill pill-red">Pain: Manual effort &amp; poor discoverability</span>
+      <span class="impact-pill pill-green">Fix: AI tags from image + text signals</span>
+      <span class="impact-pill pill-purple">Gain: Better search, faster ops</span>
+    </div>
+  </div>
+
+  <hr class="divider">
+
+  <!-- FEATURE 03 -->
+  <div class="feature-section">
+    <div class="feature-header">
+      <div class="feature-number">03</div>
+      <div class="feature-header-text">
+        <div class="feature-category">Classification AI</div>
+        <div class="feature-name">Auto Classification</div>
+      </div>
+    </div>
+    <div class="three-col">
+      <div class="col-block challenge">
+        <div class="col-label">Business Challenge</div>
+        <ul>
+          <li>Products placed in wrong categories cause marketplace rejections</li>
+          <li>Manual classification is subjective and inconsistent across teams</li>
+          <li>Complex category hierarchies (GS1, eCl@ss) require specialist knowledge</li>
+          <li>Mis-categorised products hurt customer browsing and trust</li>
+          <li>Re-classification cycles are costly and time-consuming to fix</li>
+        </ul>
+      </div>
+      <div class="col-block resolution">
+        <div class="col-label">How PIM-AI Resolves It</div>
+        <ul>
+          <li>AI maps products to the right category using descriptions and attributes</li>
+          <li>Supports GS1, eCl@ss, and custom internal taxonomy structures</li>
+          <li>Confidence scoring surfaces borderline cases for review</li>
+          <li>Learns from corrections to improve over time</li>
+          <li>Processes new supplier products automatically on ingestion</li>
+        </ul>
+      </div>
+      <div class="col-block benefit">
+        <div class="col-label">Business Benefits</div>
+        <ul>
+          <li>Fewer marketplace listing rejections</li>
+          <li>Improved catalog integrity and reporting accuracy</li>
+          <li>Reduced compliance risk in regulated industries</li>
+          <li>Faster supplier onboarding with auto-classification at intake</li>
+          <li>Consistent categorisation across all teams and regions</li>
+        </ul>
+      </div>
+    </div>
+    <div class="impact-bar">
+      <span class="impact-pill pill-red">Pain: Mis-categorisation &amp; rejections</span>
+      <span class="impact-pill pill-green">Fix: AI maps to correct taxonomy</span>
+      <span class="impact-pill pill-purple">Gain: Compliance, accuracy, speed</span>
+    </div>
+  </div>
+
+  <hr class="divider">
+
+  <!-- FEATURE 04 -->
+  <div class="feature-section">
+    <div class="feature-header">
+      <div class="feature-number">04</div>
+      <div class="feature-header-text">
+        <div class="feature-category">Automation</div>
+        <div class="feature-name">Image Sequencing</div>
+      </div>
+    </div>
+    <div class="three-col">
+      <div class="col-block challenge">
+        <div class="col-label">Business Challenge</div>
+        <ul>
+          <li>Images uploaded by suppliers in random or incorrect order</li>
+          <li>Each marketplace has different image sequence requirements</li>
+          <li>Manual reordering across thousands of products is unsustainable</li>
+          <li>Lifestyle or detail images appearing as hero shots reduce conversion</li>
+          <li>No consistent enforcement of brand image standards at scale</li>
+        </ul>
+      </div>
+      <div class="col-block resolution">
+        <div class="col-label">How PIM-AI Resolves It</div>
+        <ul>
+          <li>AI identifies image type — hero, lifestyle, detail, infographic, spec sheet</li>
+          <li>Category-level rules define the required sequence for each product type</li>
+          <li>Images auto-reordered on upload — no manual intervention needed</li>
+          <li>Marketplace-specific rulesets (Amazon, Zalando, etc.) supported</li>
+          <li>Flags images that don't meet sequence or quality thresholds</li>
+        </ul>
+      </div>
+      <div class="col-block benefit">
+        <div class="col-label">Business Benefits</div>
+        <ul>
+          <li>Higher conversion from correct hero image presentation</li>
+          <li>Consistent brand standards enforced automatically</li>
+          <li>Zero manual reordering effort across the catalog</li>
+          <li>Marketplace compliance without manual checking</li>
+          <li>Faster product publishing cycle end-to-end</li>
+        </ul>
+      </div>
+    </div>
+    <div class="impact-bar">
+      <span class="impact-pill pill-red">Pain: Wrong image order, manual rework</span>
+      <span class="impact-pill pill-green">Fix: AI identifies &amp; sequences by rules</span>
+      <span class="impact-pill pill-purple">Gain: Conversion, compliance, consistency</span>
+    </div>
+  </div>
+
+  <hr class="divider">
+
+  <!-- FEATURE 05 -->
+  <div class="feature-section">
+    <div class="feature-header">
+      <div class="feature-number">05</div>
+      <div class="feature-header-text">
+        <div class="feature-category">Image AI</div>
+        <div class="feature-name">Image Quality Enhancement</div>
+      </div>
+    </div>
+    <div class="three-col">
+      <div class="col-block challenge">
+        <div class="col-label">Business Challenge</div>
+        <ul>
+          <li>Supplier images are often low resolution, poorly lit, or cluttered</li>
+          <li>Photo reshoots are expensive and slow — especially for large catalogs</li>
+          <li>Poor imagery reduces conversion and damages brand perception</li>
+          <li>Manual editing in Photoshop is time-intensive and requires skilled staff</li>
+          <li>Inconsistent image quality across supplier product sets</li>
+        </ul>
+      </div>
+      <div class="col-block resolution">
+        <div class="col-label">How PIM-AI Resolves It</div>
+        <ul>
+          <li>AI sharpening and resolution upscaling applied automatically</li>
+          <li>Background removal and white/neutral background replacement</li>
+          <li>Clutter, watermarks, and distracting elements removed</li>
+          <li>Colour correction and white balance normalisation</li>
+          <li>Batch processes entire supplier image sets overnight</li>
+        </ul>
+      </div>
+      <div class="col-block benefit">
+        <div class="col-label">Business Benefits</div>
+        <ul>
+          <li>Significantly lower photography and editing costs</li>
+          <li>Consistent, professional image quality across all listings</li>
+          <li>Higher conversion from better product presentation</li>
+          <li>Faster time-to-publish without waiting for reshoots</li>
+          <li>Creative team freed from repetitive editing tasks</li>
+        </ul>
+      </div>
+    </div>
+    <div class="impact-bar">
+      <span class="impact-pill pill-red">Pain: Poor supplier images, high edit cost</span>
+      <span class="impact-pill pill-green">Fix: AI cleans, sharpens, backgrounds</span>
+      <span class="impact-pill pill-purple">Gain: Better UX, lower cost, faster listing</span>
+    </div>
+  </div>
+
+  <hr class="divider">
+
+  <!-- FEATURE 06 -->
+  <div class="feature-section">
+    <div class="feature-header">
+      <div class="feature-number">06</div>
+      <div class="feature-header-text">
+        <div class="feature-category">OCR + AI</div>
+        <div class="feature-name">Image-to-Product Data</div>
+      </div>
+    </div>
+    <div class="three-col">
+      <div class="col-block challenge">
+        <div class="col-label">Business Challenge</div>
+        <ul>
+          <li>CPG and FMCG teams manually re-key data from supplier labels</li>
+          <li>Ingredients, allergens, and nutritional info must be 100% accurate</li>
+          <li>Suppliers deliver product info as images or PDFs — not structured data</li>
+          <li>Human transcription errors create compliance and safety risks</li>
+          <li>Label updates from suppliers require manual catalog corrections</li>
+        </ul>
+      </div>
+      <div class="col-block resolution">
+        <div class="col-label">How PIM-AI Resolves It</div>
+        <ul>
+          <li>OCR + AI reads product labels and packaging images automatically</li>
+          <li>Extracts nutritional values, ingredients, claims, certifications, allergens</li>
+          <li>Structures extracted data into your PIM attribute schema</li>
+          <li>Validates data against regulatory compliance rules</li>
+          <li>Flags discrepancies between label data and existing records</li>
+        </ul>
+      </div>
+      <div class="col-block benefit">
+        <div class="col-label">Business Benefits</div>
+        <ul>
+          <li>Eliminates manual re-keying of label data entirely</li>
+          <li>Reduces compliance and safety risk from transcription errors</li>
+          <li>Accelerates supplier onboarding in CPG / FMCG significantly</li>
+          <li>Instantly structured, usable product data from any packaging image</li>
+          <li>Supports regulatory audit trails with source image traceability</li>
+        </ul>
+      </div>
+    </div>
+    <div class="impact-bar">
+      <span class="impact-pill pill-red">Pain: Manual re-keying, compliance risk</span>
+      <span class="impact-pill pill-green">Fix: AI reads labels, structures data</span>
+      <span class="impact-pill pill-purple">Gain: Accuracy, speed, compliance</span>
+    </div>
+  </div>
+
+  <hr class="divider">
+
+  <!-- FEATURE 07 -->
+  <div class="feature-section">
+    <div class="feature-header">
+      <div class="feature-number">07</div>
+      <div class="feature-header-text">
+        <div class="feature-category">Enrichment</div>
+        <div class="feature-name">Product Data Enrichment</div>
+      </div>
+    </div>
+    <div class="three-col">
+      <div class="col-block challenge">
+        <div class="col-label">Business Challenge</div>
+        <ul>
+          <li>Suppliers provide incomplete or sparse product records</li>
+          <li>Chasing suppliers for missing data creates delays and friction</li>
+          <li>Incomplete listings lose sales — buyers need full specifications</li>
+          <li>Research to fill data gaps is manual, slow, and inconsistent</li>
+          <li>B2B buyers abandon without complete technical specs</li>
+        </ul>
+      </div>
+      <div class="col-block resolution">
+        <div class="col-label">How PIM-AI Resolves It</div>
+        <ul>
+          <li>Identifies data gaps across the catalog automatically</li>
+          <li>Pulls data from public sources, manufacturer sites, and open APIs</li>
+          <li>LLM fills specification and description gaps intelligently</li>
+          <li>Source attribution recorded for every enriched data point</li>
+          <li>Confidence scores flag low-certainty enrichments for review</li>
+        </ul>
+      </div>
+      <div class="col-block benefit">
+        <div class="col-label">Business Benefits</div>
+        <ul>
+          <li>Richer listings with complete specifications and attributes</li>
+          <li>Lower cart abandonment from information gaps</li>
+          <li>Reduced supplier dependency for routine data completion</li>
+          <li>Faster time-to-market for new products from any supplier</li>
+          <li>Higher buyer confidence — particularly in B2B procurement</li>
+        </ul>
+      </div>
+    </div>
+    <div class="impact-bar">
+      <span class="impact-pill pill-red">Pain: Incomplete data, supplier chasing</span>
+      <span class="impact-pill pill-green">Fix: AI fills gaps from public &amp; API sources</span>
+      <span class="impact-pill pill-purple">Gain: Richer listings, lower abandonment</span>
+    </div>
+  </div>
+
+  <hr class="divider">
+
+  <!-- FEATURE 08 -->
+  <div class="feature-section">
+    <div class="feature-header">
+      <div class="feature-number">08</div>
+      <div class="feature-header-text">
+        <div class="feature-category">Agentic AI</div>
+        <div class="feature-name">Agentic Commerce</div>
+      </div>
+    </div>
+
+    <p style="font-size:14px;color:#555;line-height:1.75;margin-bottom:1.25rem;">Agentic Commerce is an internal AI-powered layer that enables autonomous agents to manage, query, and act on catalog, pricing, and inventory decisions on behalf of business procurement teams — without human intervention at every step. PIM-AI provides the structured foundation these agents rely on: a clean product catalog API, a conversational discovery interface, and a transaction-ready checkout layer.</p>
+
+    <div class="three-col">
+      <div class="col-block challenge">
+        <div class="col-label">Business Challenge</div>
+        <ul>
+          <li>Procurement teams manually query catalogs, compare specs, and validate pricing — a slow, repetitive process</li>
+          <li>Catalog, pricing, and inventory data sits in silos — agents can't act on it without clean, structured APIs</li>
+          <li>Procurement decisions are delayed by the need for human approval at every routine step</li>
+          <li>No intelligent layer to match procurement intent with the right product automatically</li>
+          <li>Reordering, substitution, and availability checks require manual effort and cause supply chain delays</li>
+        </ul>
+      </div>
+      <div class="col-block resolution">
+        <div class="col-label">How PIM-AI Resolves It</div>
+        <ul>
+          <li>Exposes a structured catalog API that AI agents can query in real time — product specs, pricing, availability, and variants</li>
+          <li>Conversational discovery interface lets agents resolve complex procurement queries in natural language</li>
+          <li>AI agents autonomously compare products, validate against procurement rules, and select the best match</li>
+          <li>Full transaction and checkout layer allows agents to raise purchase orders without manual handoff</li>
+          <li>Inventory and pricing signals feed agents so substitutions and reorders happen automatically</li>
+        </ul>
+      </div>
+      <div class="col-block benefit">
+        <div class="col-label">Business Benefits</div>
+        <ul>
+          <li>Procurement cycles reduced from days to minutes through autonomous agent execution</li>
+          <li>Fewer human touchpoints on routine reorders, freeing procurement teams for strategic decisions</li>
+          <li>Real-time pricing and inventory decisions eliminate stock-outs and missed savings</li>
+          <li>Consistent application of procurement rules and approval thresholds across every transaction</li>
+          <li>Positions the business at the forefront of AI-driven commerce infrastructure</li>
+        </ul>
+      </div>
+    </div>
+
+    <div style="background:#f8f8f5;border:1px solid #e4e4e0;border-radius:4px;padding:1rem 1.25rem;margin:1rem 0;">
+      <div style="font-family:Arial,sans-serif;font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#888;margin-bottom:.65rem;">Three Core Capabilities PIM-AI Provides to Agents</div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;">
+        <div>
+          <div style="font-family:Arial,sans-serif;font-size:12px;font-weight:600;color:#333;margin-bottom:.35rem;">Structured Catalog API</div>
+          <div style="font-size:13px;color:#555;line-height:1.6;">Clean, queryable product data — specs, variants, pricing, and availability — that agents can consume and act on in real time.</div>
+        </div>
+        <div>
+          <div style="font-family:Arial,sans-serif;font-size:12px;font-weight:600;color:#333;margin-bottom:.35rem;">Conversational Discovery</div>
+          <div style="font-size:13px;color:#555;line-height:1.6;">A natural language interface agents use to resolve complex, ambiguous procurement queries against the full product catalog.</div>
+        </div>
+        <div>
+          <div style="font-family:Arial,sans-serif;font-size:12px;font-weight:600;color:#333;margin-bottom:.35rem;">Transaction &amp; Checkout Layer</div>
+          <div style="font-size:13px;color:#555;line-height:1.6;">Agents can raise purchase orders, apply procurement rules, and complete transactions end-to-end — without manual handoff.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="impact-bar">
+      <span class="impact-pill pill-red">Pain: Manual procurement, siloed data</span>
+      <span class="impact-pill pill-green">Fix: Agents query, decide &amp; transact autonomously</span>
+      <span class="impact-pill pill-purple">Gain: Speed, consistency, cost reduction</span>
+    </div>
+  </div>
+
+  <hr class="divider">
+
+  <div class="footer">PIM-AI &nbsp;·&nbsp; Feature Deep Dive &nbsp;·&nbsp; Version 1.0 &nbsp;·&nbsp; April 2026 &nbsp;·&nbsp; Confidential</div>
+
+</div>
+</body>
+</html>

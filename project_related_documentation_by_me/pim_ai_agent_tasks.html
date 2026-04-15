@@ -1,0 +1,667 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>PIM-AI – Agent Development Task List</title>
+<style>
+  @media print {
+    .no-print{display:none}
+    .page{box-shadow:none;margin:0;border-radius:0}
+    .agent-section{page-break-inside:avoid}
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:Arial,Helvetica,sans-serif;background:#f4f4f1;color:#1a1a1a;font-size:13px}
+  .page{max-width:960px;margin:2rem auto;background:#fff;border-radius:4px;box-shadow:0 2px 16px rgba(0,0,0,0.08);padding:3.5rem 4.5rem}
+  .no-print{text-align:right;max-width:960px;margin:1rem auto}
+  .no-print button{font-size:13px;padding:8px 20px;border:1px solid #999;border-radius:4px;background:#fff;cursor:pointer}
+  .no-print button:hover{background:#f0f0ec}
+
+  .cover-tag{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:#888;margin-bottom:.75rem}
+  .cover-title{font-size:30px;font-weight:400;font-family:Georgia,serif;color:#111;line-height:1.2;margin-bottom:.5rem}
+  .cover-sub{font-size:14px;color:#555;line-height:1.7;margin-bottom:1.25rem;max-width:680px}
+  .cover-meta{font-size:11px;color:#aaa;border-top:1px solid #e0e0e0;padding-top:1rem;display:flex;gap:2rem;flex-wrap:wrap}
+  .divider{border:none;border-top:1px solid #e4e4e0;margin:2.5rem 0}
+  .thin-div{border:none;border-top:.5px solid #ebebeb;margin:1.25rem 0}
+
+  /* Legend */
+  .legend{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:2rem}
+  .legend-item{display:flex;align-items:center;gap:6px;font-size:12px;color:#555}
+  .leg-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+
+  /* Agent header */
+  .agent-section{margin-bottom:3rem}
+  .agent-header{display:flex;align-items:center;gap:12px;margin-bottom:1.25rem;padding:.9rem 1.1rem;border-radius:4px;border:1px solid}
+  .agent-icon{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;flex-shrink:0}
+  .agent-title{font-size:17px;font-weight:600;color:#111}
+  .agent-desc{font-size:12px;color:#555;margin-top:2px;line-height:1.5}
+
+  .a1-bg{background:#f0f7ff;border-color:#c5ddf5} .a1-ic{background:#d0e8fa;color:#0c4a8a}
+  .a2-bg{background:#f2faf5;border-color:#b8e0cb} .a2-ic{background:#c8edda;color:#0f5a35}
+  .a3-bg{background:#f5f2fd;border-color:#d0c8f0} .a3-ic{background:#e0d8fa;color:#3a2aaa}
+
+  /* Task table */
+  .task-table{width:100%;border-collapse:collapse;margin-bottom:.75rem}
+  .task-table th{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#888;padding:6px 10px;border-bottom:1px solid #e0e0e0;text-align:left;background:#fafaf8}
+  .task-table td{padding:8px 10px;border-bottom:.5px solid #efefeb;vertical-align:top;font-size:12px;line-height:1.55;color:#333}
+  .task-table tr:last-child td{border-bottom:none}
+  .task-table tr:hover td{background:#fafaf8}
+
+  .cat-row td{background:#f7f7f4;font-weight:700;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#555;padding:7px 10px}
+
+  .priority{display:inline-block;font-size:10px;font-weight:700;padding:2px 8px;border-radius:99px;letter-spacing:.04em}
+  .p-high{background:#fff0f0;color:#b91c1c;border:1px solid #fccaca}
+  .p-med{background:#fffbea;color:#92600a;border:1px solid #fde68a}
+  .p-low{background:#f0fdf4;color:#15622a;border:1px solid #bbf7d0}
+
+  .type{display:inline-block;font-size:10px;padding:2px 8px;border-radius:99px}
+  .t-be{background:#e8f0fe;color:#1a4699;border:1px solid #c5d5fb}
+  .t-fe{background:#fef9e8;color:#7a5200;border:1px solid #fde88a}
+  .t-ai{background:#f3f0fd;color:#4b35b0;border:1px solid #d4cafc}
+  .t-inf{background:#f0fdf8;color:#0a5c45;border:1px solid #a7f3d0}
+  .t-int{background:#fdf0f8;color:#7a1a5a;border:1px solid #f0a8d8}
+
+  .dep{font-size:11px;color:#999;font-style:italic}
+  .task-num{color:#bbb;font-weight:600;font-size:11px;min-width:28px}
+
+  /* Summary bar */
+  .summary-bar{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:1.5rem}
+  .sum-box{background:#f7f7f4;border-radius:4px;padding:.85rem;text-align:center}
+  .sum-num{font-size:22px;font-weight:400;font-family:Georgia,serif;color:#111}
+  .sum-lbl{font-size:11px;color:#888;margin-top:3px}
+
+  .phase-label{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#aaa;margin:1.25rem 0 .5rem}
+
+  .footer{font-size:11px;color:#bbb;text-align:center;margin-top:3rem;padding-top:1.5rem;border-top:1px solid #e8e8e4}
+</style>
+</head>
+<body>
+
+<div class="no-print"><button onclick="window.print()">Print / Save as PDF</button></div>
+
+<div class="page">
+
+  <div class="cover-tag">Developer Task Specification</div>
+  <div class="cover-title">PIM-AI — Agent Development Task List</div>
+  <div class="cover-sub">A structured breakdown of all development tasks required to build the three PIM-AI agents — Catalog Management, Procurement/Buying, and Content & Enrichment. Each task includes type, priority, and dependencies to guide sprint planning and sequencing.</div>
+  <div class="cover-meta">
+    <span>Version 1.0</span>
+    <span>April 2026</span>
+    <span>Audience: Engineering / Development Team</span>
+    <span>Integration: REST API · Direct DB · MCP Tools</span>
+  </div>
+
+  <hr class="divider">
+
+  <div class="legend">
+    <div style="font-size:11px;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:.06em;align-self:center;margin-right:4px;">Task Type</div>
+    <div class="legend-item"><div class="leg-dot" style="background:#4a76e8"></div>Backend</div>
+    <div class="legend-item"><div class="leg-dot" style="background:#c4860a"></div>Frontend</div>
+    <div class="legend-item"><div class="leg-dot" style="background:#6b50d8"></div>AI / LLM</div>
+    <div class="legend-item"><div class="leg-dot" style="background:#0a7a5c"></div>Infrastructure</div>
+    <div class="legend-item"><div class="leg-dot" style="background:#a01a78"></div>Integration</div>
+    <div style="margin-left:1rem;font-size:11px;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:.06em;align-self:center;margin-right:4px;">Priority</div>
+    <div class="legend-item"><div class="leg-dot" style="background:#b91c1c"></div>High</div>
+    <div class="legend-item"><div class="leg-dot" style="background:#92600a"></div>Medium</div>
+    <div class="legend-item"><div class="leg-dot" style="background:#15622a"></div>Low</div>
+  </div>
+
+  <!-- SHARED FOUNDATION -->
+  <div class="phase-label">Shared Foundation — Required by all three agents</div>
+  <table class="task-table">
+    <thead>
+      <tr>
+        <th style="width:36px">#</th>
+        <th style="width:38%">Task</th>
+        <th>Description</th>
+        <th style="width:70px">Type</th>
+        <th style="width:62px">Priority</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr class="cat-row"><td colspan="5">LLM & Agent Core Setup</td></tr>
+      <tr>
+        <td class="task-num">F-01</td>
+        <td>LLM platform evaluation &amp; selection</td>
+        <td>Benchmark Claude, GPT-4o, Gemini, and open-source models (Llama 3, Mistral) against PIM-AI tasks. Define selection criteria: tool-calling capability, context window, cost, latency.</td>
+        <td><span class="type t-ai">AI</span></td>
+        <td><span class="priority p-high">High</span></td>
+      </tr>
+      <tr>
+        <td class="task-num">F-02</td>
+        <td>Agent orchestration framework setup</td>
+        <td>Select and configure orchestration layer — LangChain, LlamaIndex, Autogen, or custom. Define agent loop: perceive → plan → act → observe. Set up memory (short-term context + long-term state store).</td>
+        <td><span class="type t-ai">AI</span></td>
+        <td><span class="priority p-high">High</span></td>
+      </tr>
+      <tr>
+        <td class="task-num">F-03</td>
+        <td>Tool / function calling schema design</td>
+        <td>Define the standard JSON schema for all agent tools across the three agents. Includes input/output contracts, error formats, and retry logic. This schema is shared across REST API, DB, and MCP tool calls.</td>
+        <td><span class="type t-be">Backend</span></td>
+        <td><span class="priority p-high">High</span></td>
+      </tr>
+      <tr>
+        <td class="task-num">F-04</td>
+        <td>MCP server setup &amp; tool registration</td>
+        <td>Stand up MCP server layer. Register tools for catalog read/write, pricing query, inventory check, and order actions. Expose tool manifest for agent discovery. Define permission scopes per agent type.</td>
+        <td><span class="type t-inf">Infra</span></td>
+        <td><span class="priority p-high">High</span></td>
+      </tr>
+      <tr>
+        <td class="task-num">F-05</td>
+        <td>Authentication &amp; agent identity management</td>
+        <td>Implement service account model for agents (OAuth 2.0 / API keys). Define per-agent permission scopes. Audit log all agent actions with identity, timestamp, and payload for traceability.</td>
+        <td><span class="type t-inf">Infra</span></td>
+        <td><span class="priority p-high">High</span></td>
+      </tr>
+      <tr>
+        <td class="task-num">F-06</td>
+        <td>Agent action audit &amp; logging service</td>
+        <td>Build a centralised logging service that records every agent decision, tool call, and outcome. Required for debugging, compliance, and human-in-the-loop review. Store in append-only log with agent ID and session context.</td>
+        <td><span class="type t-be">Backend</span></td>
+        <td><span class="priority p-high">High</span></td>
+      </tr>
+      <tr>
+        <td class="task-num">F-07</td>
+        <td>Human-in-the-loop (HITL) escalation framework</td>
+        <td>Define confidence thresholds below which agents must escalate to a human. Build notification + approval UI. Agents pause and await approval before executing irreversible actions (e.g. bulk updates, purchase orders).</td>
+        <td><span class="type t-fe">Frontend</span></td>
+        <td><span class="priority p-high">High</span></td>
+      </tr>
+      <tr>
+        <td class="task-num">F-08</td>
+        <td>Shared vector database / semantic search layer</td>
+        <td>Set up vector DB (Pinecone, Weaviate, or pgvector) for semantic product search across all agents. Embed product catalog, descriptions, and attributes. Used by all three agents for natural language product lookup.</td>
+        <td><span class="type t-inf">Infra</span></td>
+        <td><span class="priority p-med">Medium</span></td>
+      </tr>
+      <tr>
+        <td class="task-num">F-09</td>
+        <td>Agent testing &amp; evaluation harness</td>
+        <td>Build automated test suite for agent tasks: unit tests per tool, integration tests per workflow, and LLM eval framework (e.g. LangSmith, RAGAS) for response quality. Include regression tests for prompt changes.</td>
+        <td><span class="type t-ai">AI</span></td>
+        <td><span class="priority p-med">Medium</span></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <hr class="divider">
+
+  <!-- AGENT 1 -->
+  <div class="agent-section">
+    <div class="agent-header a1-bg">
+      <div class="agent-icon a1-ic">CA</div>
+      <div>
+        <div class="agent-title">Agent 1 — Catalog Management Agent</div>
+        <div class="agent-desc">Autonomously manages product records, classifications, tags, image sequencing, and data quality across the catalog. Acts on behalf of catalog managers and merchandisers.</div>
+      </div>
+    </div>
+
+    <div class="summary-bar">
+      <div class="sum-box"><div class="sum-num">16</div><div class="sum-lbl">Total tasks</div></div>
+      <div class="sum-box"><div class="sum-num">7</div><div class="sum-lbl">High priority</div></div>
+      <div class="sum-box"><div class="sum-num">6</div><div class="sum-lbl">Medium priority</div></div>
+      <div class="sum-box"><div class="sum-num">3</div><div class="sum-lbl">Low priority</div></div>
+    </div>
+
+    <table class="task-table">
+      <thead>
+        <tr>
+          <th style="width:36px">#</th>
+          <th style="width:36%">Task</th>
+          <th>Description</th>
+          <th style="width:70px">Type</th>
+          <th style="width:62px">Priority</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="cat-row"><td colspan="5">Data Access & API Layer</td></tr>
+        <tr>
+          <td class="task-num">C-01</td>
+          <td>Product catalog read API (REST)</td>
+          <td>Build REST endpoints for agent to query products by ID, SKU, category, and attribute filters. Return structured JSON with full attribute schema. Support pagination and bulk fetch.</td>
+          <td><span class="type t-be">Backend</span></td>
+          <td><span class="priority p-high">High</span></td>
+        </tr>
+        <tr>
+          <td class="task-num">C-02</td>
+          <td>Product catalog write API (REST)</td>
+          <td>Build REST endpoints for agent to create, update, and patch product records. Support partial updates (PATCH). Validate schema on write. Emit change events to downstream systems.</td>
+          <td><span class="type t-be">Backend</span></td>
+          <td><span class="priority p-high">High</span></td>
+        </tr>
+        <tr>
+          <td class="task-num">C-03</td>
+          <td>Direct DB read access layer</td>
+          <td>Create read-only DB views and stored procedures for agent bulk queries — category stats, data completeness scores, missing attribute reports. Use read replica to avoid impacting production writes.</td>
+          <td><span class="type t-be">Backend</span></td>
+          <td><span class="priority p-high">High</span></td>
+        </tr>
+        <tr class="cat-row"><td colspan="5">Agent Tools (MCP / Function Calls)</td></tr>
+        <tr>
+          <td class="task-num">C-04</td>
+          <td>Tool: classify_product</td>
+          <td>Agent tool that takes product attributes + description as input and returns the correct category path (GS1 / eCl@ss / custom). Calls classification model internally. Returns confidence score and top-3 candidates.</td>
+          <td><span class="type t-ai">AI</span></td>
+          <td><span class="priority p-high">High</span></td>
+        </tr>
+        <tr>
+          <td class="task-num">C-05</td>
+          <td>Tool: tag_product</td>
+          <td>Agent tool that analyses product image URL + description and returns suggested attribute tags. Maps to attribute schema. Returns tags with confidence scores. Supports batch mode for multiple SKUs.</td>
+          <td><span class="type t-ai">AI</span></td>
+          <td><span class="priority p-high">High</span></td>
+        </tr>
+        <tr>
+          <td class="task-num">C-06</td>
+          <td>Tool: sequence_images</td>
+          <td>Agent tool that takes a product ID and list of image URLs, identifies image types (hero/lifestyle/detail), and returns the correctly ordered sequence based on category ruleset. Applies marketplace-specific rules.</td>
+          <td><span class="type t-ai">AI</span></td>
+          <td><span class="priority p-high">High</span></td>
+        </tr>
+        <tr>
+          <td class="task-num">C-07</td>
+          <td>Tool: check_data_quality</td>
+          <td>Agent tool that scans a product record or category and returns a data completeness score, list of missing required fields, and recommended actions. Used to drive autonomous enrichment workflows.</td>
+          <td><span class="type t-be">Backend</span></td>
+          <td><span class="priority p-high">High</span></td>
+        </tr>
+        <tr>
+          <td class="task-num">C-08</td>
+          <td>Tool: bulk_update_products</td>
+          <td>Agent tool for applying updates to multiple products simultaneously (e.g. re-classify entire category, retag a brand's products). Requires HITL approval above a configurable threshold. Returns job ID for async tracking.</td>
+          <td><span class="type t-be">Backend</span></td>
+          <td><span class="priority p-med">Medium</span></td>
+        </tr>
+        <tr class="cat-row"><td colspan="5">Agent Behaviour & Workflows</td></tr>
+        <tr>
+          <td class="task-num">C-09</td>
+          <td>System prompt &amp; persona design</td>
+          <td>Design the catalog agent's system prompt: role definition, task scope, tone, escalation rules, and constraints (e.g. never delete records without approval). Include few-shot examples for classification and tagging decisions.</td>
+          <td><span class="type t-ai">AI</span></td>
+          <td><span class="priority p-high">High</span></td>
+        </tr>
+        <tr>
+          <td class="task-num">C-10</td>
+          <td>Autonomous data quality patrol workflow</td>
+          <td>Build scheduled agent workflow that scans the catalog for data gaps, triggers enrichment or tagging tools, and surfaces a daily summary report. Agent runs autonomously but logs all actions for review.</td>
+          <td><span class="type t-ai">AI</span></td>
+          <td><span class="priority p-med">Medium</span></td>
+        </tr>
+        <tr>
+          <td class="task-num">C-11</td>
+          <td>New product onboarding workflow</td>
+          <td>Agent workflow triggered on new product ingestion. Sequentially runs: classify → tag → generate description → sequence images → check quality. Outputs a ready-to-publish product record or flags for human review.</td>
+          <td><span class="type t-ai">AI</span></td>
+          <td><span class="priority p-med">Medium</span></td>
+        </tr>
+        <tr>
+          <td class="task-num">C-12</td>
+          <td>Conflict detection &amp; resolution logic</td>
+          <td>Handle cases where agent-suggested classification or tags conflict with existing human-assigned values. Define resolution policy: agent defers, flags for review, or overwrites based on confidence threshold.</td>
+          <td><span class="type t-be">Backend</span></td>
+          <td><span class="priority p-med">Medium</span></td>
+        </tr>
+        <tr class="cat-row"><td colspan="5">UI & Monitoring</td></tr>
+        <tr>
+          <td class="task-num">C-13</td>
+          <td>Catalog agent dashboard</td>
+          <td>Build UI showing agent activity: tasks completed, products processed, quality scores improved, pending approvals, and error log. Catalog managers can review and override any agent action from this view.</td>
+          <td><span class="type t-fe">Frontend</span></td>
+          <td><span class="priority p-med">Medium</span></td>
+        </tr>
+        <tr>
+          <td class="task-num">C-14</td>
+          <td>Agent conversational interface</td>
+          <td>Chat UI allowing catalog managers to instruct the agent in natural language: "Re-classify all products in the Outdoor category", "Show me products with missing descriptions." Agent interprets, plans, and executes.</td>
+          <td><span class="type t-fe">Frontend</span></td>
+          <td><span class="priority p-med">Medium</span></td>
+        </tr>
+        <tr>
+          <td class="task-num">C-15</td>
+          <td>Change history &amp; rollback</td>
+          <td>Every agent write action creates a versioned record. UI allows catalog managers to view before/after for any field and roll back agent changes at product or batch level.</td>
+          <td><span class="type t-be">Backend</span></td>
+          <td><span class="priority p-low">Low</span></td>
+        </tr>
+        <tr>
+          <td class="task-num">C-16</td>
+          <td>Agent performance metrics &amp; reporting</td>
+          <td>Track agent KPIs: classification accuracy rate, tagging precision, data quality score delta, average time to onboard a product. Export reports for management review.</td>
+          <td><span class="type t-fe">Frontend</span></td>
+          <td><span class="priority p-low">Low</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <hr class="divider">
+
+  <!-- AGENT 2 -->
+  <div class="agent-section">
+    <div class="agent-header a2-bg">
+      <div class="agent-icon a2-ic">PA</div>
+      <div>
+        <div class="agent-title">Agent 2 — Procurement / Buying Agent</div>
+        <div class="agent-desc">Autonomously handles catalog queries, product selection, pricing decisions, inventory checks, and purchase order creation on behalf of business procurement teams.</div>
+      </div>
+    </div>
+
+    <div class="summary-bar">
+      <div class="sum-box"><div class="sum-num">17</div><div class="sum-lbl">Total tasks</div></div>
+      <div class="sum-box"><div class="sum-num">8</div><div class="sum-lbl">High priority</div></div>
+      <div class="sum-box"><div class="sum-num">6</div><div class="sum-lbl">Medium priority</div></div>
+      <div class="sum-box"><div class="sum-num">3</div><div class="sum-lbl">Low priority</div></div>
+    </div>
+
+    <table class="task-table">
+      <thead>
+        <tr>
+          <th style="width:36px">#</th>
+          <th style="width:36%">Task</th>
+          <th>Description</th>
+          <th style="width:70px">Type</th>
+          <th style="width:62px">Priority</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="cat-row"><td colspan="5">Data Access & API Layer</td></tr>
+        <tr>
+          <td class="task-num">P-01</td>
+          <td>Catalog query API for agents</td>
+          <td>REST API for structured product search by spec, category, price range, and availability. Optimised for agent consumption — returns ranked results with match scores. Supports natural language query translation to filters.</td>
+          <td><span class="type t-be">Backend</span></td>
+          <td><span class="priority p-high">High</span></td>
+        </tr>
+        <tr>
+          <td class="task-num">P-02</td>
+          <td>Real-time pricing API</td>
+          <td>Endpoint returning current pricing, discount tiers, contract pricing per buyer, and promotional pricing. Agent uses this to compare options and apply procurement rules (e.g. always select lowest cost within spec).</td>
+          <td><span class="type t-be">Backend</span></td>
+          <td><span class="priority p-high">High</span></td>
+        </tr>
+        <tr>
+          <td class="task-num">P-03</td>
+          <td>Inventory &amp; availability API</td>
+          <td>Real-time stock levels, lead times, and warehouse locations per SKU. Agent uses to qualify products before recommending or ordering. Triggers substitution logic when stock is insufficient.</td>
+          <td><span class="type t-be">Backend</span></td>
+          <td><span class="priority p-high">High</span></td>
+        </tr>
+        <tr>
+          <td class="task-num">P-04</td>
+          <td>Purchase order creation API</td>
+          <td>REST endpoint for agent to raise, update, and submit purchase orders. Validates against procurement rules (budget limits, approved supplier list, approval thresholds). Returns PO number and status on success.</td>
+          <td><span class="type t-be">Backend</span></td>
+          <td><span class="priority p-high">High</span></td>
+        </tr>
+        <tr class="cat-row"><td colspan="5">Agent Tools (MCP / Function Calls)</td></tr>
+        <tr>
+          <td class="task-num">P-05</td>
+          <td>Tool: search_catalog</td>
+          <td>Agent tool accepting natural language or structured query, returning ranked product matches with full spec comparison. Underpinned by vector search + filter layer. Core tool for all procurement decisions.</td>
+          <td><span class="type t-ai">AI</span></td>
+          <td><span class="priority p-high">High</span></td>
+        </tr>
+        <tr>
+          <td class="task-num">P-06</td>
+          <td>Tool: compare_products</td>
+          <td>Agent tool that takes 2–N product IDs and returns a structured comparison across selected attributes (price, spec, availability, lead time). Used by agent to make or present a recommendation.</td>
+          <td><span class="type t-ai">AI</span></td>
+          <td><span class="priority p-high">High</span></td>
+        </tr>
+        <tr>
+          <td class="task-num">P-07</td>
+          <td>Tool: check_procurement_rules</td>
+          <td>Agent tool that validates a proposed product selection against procurement policy: approved supplier list, budget thresholds, category restrictions, and approval matrix. Returns pass/fail with reason.</td>
+          <td><span class="type t-be">Backend</span></td>
+          <td><span class="priority p-high">High</span></td>
+        </tr>
+        <tr>
+          <td class="task-num">P-08</td>
+          <td>Tool: raise_purchase_order</td>
+          <td>Agent tool to compile and submit a PO: supplier, line items, quantities, delivery address, and cost centre. Triggers approval workflow if above threshold. Returns PO reference and estimated delivery.</td>
+          <td><span class="type t-int">Integration</span></td>
+          <td><span class="priority p-high">High</span></td>
+        </tr>
+        <tr>
+          <td class="task-num">P-09</td>
+          <td>Tool: find_substitutes</td>
+          <td>When a product is out of stock or discontinued, agent tool finds equivalent alternatives by spec similarity. Ranks by price, availability, and compliance with procurement rules. Returns substitution rationale.</td>
+          <td><span class="type t-ai">AI</span></td>
+          <td><span class="priority p-med">Medium</span></td>
+        </tr>
+        <tr class="cat-row"><td colspan="5">Agent Behaviour & Workflows</td></tr>
+        <tr>
+          <td class="task-num">P-10</td>
+          <td>System prompt &amp; procurement rules encoding</td>
+          <td>Design procurement agent system prompt: role, decision authority, escalation rules, and procurement policy encoding. Include constraints: cannot exceed budget without approval, must prefer approved suppliers, must log all decisions.</td>
+          <td><span class="type t-ai">AI</span></td>
+          <td><span class="priority p-high">High</span></td>
+        </tr>
+        <tr>
+          <td class="task-num">P-11</td>
+          <td>Autonomous reorder workflow</td>
+          <td>Scheduled agent workflow monitoring inventory levels. When stock falls below reorder threshold, agent finds best-value restock option, validates against procurement rules, and raises PO automatically (within pre-approved limits).</td>
+          <td><span class="type t-ai">AI</span></td>
+          <td><span class="priority p-med">Medium</span></td>
+        </tr>
+        <tr>
+          <td class="task-num">P-12</td>
+          <td>Procurement request intake workflow</td>
+          <td>Agent accepts procurement requests in natural language (e.g. "I need 200 units of industrial gloves, medium, by end of month, under £8/unit"). Translates to structured search, finds options, and presents recommendation for approval.</td>
+          <td><span class="type t-ai">AI</span></td>
+          <td><span class="priority p-med">Medium</span></td>
+        </tr>
+        <tr>
+          <td class="task-num">P-13</td>
+          <td>ERP / procurement system integration</td>
+          <td>Integrate agent PO output with existing ERP (SAP, Oracle, MS Dynamics) or procurement platforms (Coupa, Jaggaer). Map PIM-AI PO schema to target system fields. Support webhook and API push.</td>
+          <td><span class="type t-int">Integration</span></td>
+          <td><span class="priority p-med">Medium</span></td>
+        </tr>
+        <tr class="cat-row"><td colspan="5">UI & Monitoring</td></tr>
+        <tr>
+          <td class="task-num">P-14</td>
+          <td>Procurement agent conversational interface</td>
+          <td>Chat-based UI for procurement users to interact with the agent. Users describe needs; agent searches, compares, and recommends. One-click approval to raise PO from within the interface.</td>
+          <td><span class="type t-fe">Frontend</span></td>
+          <td><span class="priority p-med">Medium</span></td>
+        </tr>
+        <tr>
+          <td class="task-num">P-15</td>
+          <td>Approval &amp; escalation UI</td>
+          <td>Procurement managers review agent-raised POs above threshold. UI shows agent reasoning, product comparison, and procurement rule check result. One-click approve or reject with comment.</td>
+          <td><span class="type t-fe">Frontend</span></td>
+          <td><span class="priority p-med">Medium</span></td>
+        </tr>
+        <tr>
+          <td class="task-num">P-16</td>
+          <td>Spend analytics dashboard</td>
+          <td>Visualise agent-driven procurement activity: spend by category, supplier, cost centre, and time period. Compare agent decisions vs. manual procurement baselines. Track savings identified.</td>
+          <td><span class="type t-fe">Frontend</span></td>
+          <td><span class="priority p-low">Low</span></td>
+        </tr>
+        <tr>
+          <td class="task-num">P-17</td>
+          <td>Agent decision explainability log</td>
+          <td>Every product recommendation and PO raised by the agent includes a structured rationale: why this product, what alternatives were considered, which rules were applied. Stored and viewable by procurement managers.</td>
+          <td><span class="type t-be">Backend</span></td>
+          <td><span class="priority p-low">Low</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <hr class="divider">
+
+  <!-- AGENT 3 -->
+  <div class="agent-section">
+    <div class="agent-header a3-bg">
+      <div class="agent-icon a3-ic">EA</div>
+      <div>
+        <div class="agent-title">Agent 3 — Content & Enrichment Agent</div>
+        <div class="agent-desc">Autonomously generates product descriptions, extracts data from labels and packaging, and enriches sparse product records — acting on behalf of content, marketing, and catalog teams.</div>
+      </div>
+    </div>
+
+    <div class="summary-bar">
+      <div class="sum-box"><div class="sum-num">15</div><div class="sum-lbl">Total tasks</div></div>
+      <div class="sum-box"><div class="sum-num">7</div><div class="sum-lbl">High priority</div></div>
+      <div class="sum-box"><div class="sum-num">5</div><div class="sum-lbl">Medium priority</div></div>
+      <div class="sum-box"><div class="sum-num">3</div><div class="sum-lbl">Low priority</div></div>
+    </div>
+
+    <table class="task-table">
+      <thead>
+        <tr>
+          <th style="width:36px">#</th>
+          <th style="width:36%">Task</th>
+          <th>Description</th>
+          <th style="width:70px">Type</th>
+          <th style="width:62px">Priority</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="cat-row"><td colspan="5">Data Access & API Layer</td></tr>
+        <tr>
+          <td class="task-num">E-01</td>
+          <td>Product read/write API for content agent</td>
+          <td>REST API for agent to read product records (attributes, existing descriptions, images) and write generated content back. Supports field-level writes — agent can update description without touching other fields.</td>
+          <td><span class="type t-be">Backend</span></td>
+          <td><span class="priority p-high">High</span></td>
+        </tr>
+        <tr>
+          <td class="task-num">E-02</td>
+          <td>External data sources integration</td>
+          <td>Build connectors to public enrichment sources: Open Food Facts, GS1 registry, manufacturer websites, and open product databases. Agent queries these to fill data gaps. Includes rate limiting, caching, and source attribution.</td>
+          <td><span class="type t-int">Integration</span></td>
+          <td><span class="priority p-high">High</span></td>
+        </tr>
+        <tr>
+          <td class="task-num">E-03</td>
+          <td>Image ingestion &amp; processing pipeline</td>
+          <td>Build pipeline to accept product images (URL or upload), run quality assessment, pass to enhancement model, and store enhanced versions. Agent triggers this pipeline and receives processed image URLs on completion.</td>
+          <td><span class="type t-inf">Infra</span></td>
+          <td><span class="priority p-high">High</span></td>
+        </tr>
+        <tr class="cat-row"><td colspan="5">Agent Tools (MCP / Function Calls)</td></tr>
+        <tr>
+          <td class="task-num">E-04</td>
+          <td>Tool: generate_description</td>
+          <td>Agent tool taking product attributes, category, and target channel as input. Returns SEO-optimised title and description. Supports tone/style config per brand. Includes keyword injection from category SEO rules.</td>
+          <td><span class="type t-ai">AI</span></td>
+          <td><span class="priority p-high">High</span></td>
+        </tr>
+        <tr>
+          <td class="task-num">E-05</td>
+          <td>Tool: extract_label_data</td>
+          <td>Agent tool accepting a product image URL. Runs OCR + AI extraction to return structured data: ingredients, nutritional values, allergens, certifications, and claims. Returns with field-level confidence scores.</td>
+          <td><span class="type t-ai">AI</span></td>
+          <td><span class="priority p-high">High</span></td>
+        </tr>
+        <tr>
+          <td class="task-num">E-06</td>
+          <td>Tool: enrich_product</td>
+          <td>Agent tool that takes a product ID, identifies missing required fields, queries external sources and LLM knowledge, and returns enrichment suggestions with source attribution. Agent applies enrichments above confidence threshold.</td>
+          <td><span class="type t-ai">AI</span></td>
+          <td><span class="priority p-high">High</span></td>
+        </tr>
+        <tr>
+          <td class="task-num">E-07</td>
+          <td>Tool: enhance_image</td>
+          <td>Agent tool accepting image URL and returning enhanced version URL. Applies sharpening, background removal, and colour correction via image AI model. Supports batch processing. Returns before/after metadata.</td>
+          <td><span class="type t-ai">AI</span></td>
+          <td><span class="priority p-high">High</span></td>
+        </tr>
+        <tr>
+          <td class="task-num">E-08</td>
+          <td>Tool: translate_content</td>
+          <td>Agent tool for translating generated descriptions and extracted data into target languages. Maintains technical accuracy for spec fields. Supports brand tone guidelines per locale.</td>
+          <td><span class="type t-ai">AI</span></td>
+          <td><span class="priority p-med">Medium</span></td>
+        </tr>
+        <tr class="cat-row"><td colspan="5">Agent Behaviour & Workflows</td></tr>
+        <tr>
+          <td class="task-num">E-09</td>
+          <td>System prompt &amp; brand voice design</td>
+          <td>Design content agent system prompt: role, content quality standards, SEO rules, brand voice constraints, and escalation criteria. Include few-shot examples of good vs. poor descriptions per category.</td>
+          <td><span class="type t-ai">AI</span></td>
+          <td><span class="priority p-high">High</span></td>
+        </tr>
+        <tr>
+          <td class="task-num">E-10</td>
+          <td>New supplier onboarding workflow</td>
+          <td>Agent workflow triggered when new supplier products are ingested. Reads label images → extracts data → fills gaps via enrichment → generates descriptions → enhances images → outputs publish-ready records.</td>
+          <td><span class="type t-ai">AI</span></td>
+          <td><span class="priority p-med">Medium</span></td>
+        </tr>
+        <tr>
+          <td class="task-num">E-11</td>
+          <td>Scheduled enrichment patrol</td>
+          <td>Agent runs nightly scan for products with low content scores. Prioritises enrichment queue by commercial importance (e.g. top sellers first). Processes batch and reports completeness improvement.</td>
+          <td><span class="type t-ai">AI</span></td>
+          <td><span class="priority p-med">Medium</span></td>
+        </tr>
+        <tr>
+          <td class="task-num">E-12</td>
+          <td>Content approval &amp; review workflow</td>
+          <td>Agent-generated content enters a review queue before publishing. Editors can approve, edit, or reject with feedback. Rejected content with feedback is fed back to improve future generation (RLHF loop).</td>
+          <td><span class="type t-fe">Frontend</span></td>
+          <td><span class="priority p-med">Medium</span></td>
+        </tr>
+        <tr class="cat-row"><td colspan="5">UI & Monitoring</td></tr>
+        <tr>
+          <td class="task-num">E-13</td>
+          <td>Content agent dashboard</td>
+          <td>UI showing content agent activity: descriptions generated, labels extracted, images enhanced, enrichments applied. Content completeness scores by category. Pending review queue for human editors.</td>
+          <td><span class="type t-fe">Frontend</span></td>
+          <td><span class="priority p-med">Medium</span></td>
+        </tr>
+        <tr>
+          <td class="task-num">E-14</td>
+          <td>Content quality scoring model</td>
+          <td>Build automated scoring model that evaluates generated descriptions against quality criteria: completeness, SEO keyword coverage, readability, and brand tone compliance. Score displayed alongside each generated content piece.</td>
+          <td><span class="type t-ai">AI</span></td>
+          <td><span class="priority p-low">Low</span></td>
+        </tr>
+        <tr>
+          <td class="task-num">E-15</td>
+          <td>Enrichment source traceability</td>
+          <td>Every enriched field stores its source (public DB, API, LLM, label extraction) and extraction date. Displayed in product record for transparency. Supports audit and compliance requirements.</td>
+          <td><span class="type t-be">Backend</span></td>
+          <td><span class="priority p-low">Low</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <hr class="divider">
+
+  <div style="background:#f8f8f5;border:1px solid #e4e4e0;border-radius:4px;padding:1.25rem 1.5rem;margin-bottom:1.5rem">
+    <div style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#888;margin-bottom:.75rem">Recommended Build Sequence</div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;font-size:12px">
+      <div style="border-left:3px solid #b91c1c;padding-left:10px">
+        <div style="font-weight:700;color:#333;margin-bottom:4px">Phase 1 — Foundation</div>
+        <div style="color:#555;line-height:1.6">F-01 to F-07: LLM selection, orchestration, MCP setup, auth, audit logging, HITL framework</div>
+      </div>
+      <div style="border-left:3px solid #92600a;padding-left:10px">
+        <div style="font-weight:700;color:#333;margin-bottom:4px">Phase 2 — Agent 1</div>
+        <div style="color:#555;line-height:1.6">Catalog Management Agent (C-01 to C-16): APIs, tools, workflows, dashboard</div>
+      </div>
+      <div style="border-left:3px solid #1a6b3c;padding-left:10px">
+        <div style="font-weight:700;color:#333;margin-bottom:4px">Phase 3 — Agent 3</div>
+        <div style="color:#555;line-height:1.6">Content & Enrichment Agent (E-01 to E-15): Label extraction, description gen, enrichment</div>
+      </div>
+      <div style="border-left:3px solid #3a2aaa;padding-left:10px">
+        <div style="font-weight:700;color:#333;margin-bottom:4px">Phase 4 — Agent 2</div>
+        <div style="color:#555;line-height:1.6">Procurement Agent (P-01 to P-17): Catalog query, pricing, inventory, PO creation, ERP integration</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">PIM-AI &nbsp;·&nbsp; Agent Development Task List &nbsp;·&nbsp; Version 1.0 &nbsp;·&nbsp; April 2026 &nbsp;·&nbsp; Confidential — Engineering Use Only</div>
+
+</div>
+</body>
+</html>
