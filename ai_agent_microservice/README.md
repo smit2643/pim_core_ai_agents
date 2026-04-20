@@ -255,6 +255,152 @@ Response:
 
 ---
 
+---
+
+### Generate a description directly from a PIM record
+
+```
+POST /pim/generate-description
+Content-Type: application/json
+```
+
+Accepts a product record **exactly as exported from the PIM system** — no field mapping required by the caller. The adapter layer handles the conversion internally and feeds the same generation pipeline as `POST /generate-description`.
+
+Request body:
+
+```json
+{
+  "pim_record": {
+    "productID": 705517,
+    "shortSku": "969196",
+    "productName": "MACSTUDIO E25 M4M/64/1TB",
+    "coordGroupDescription": "APPLE DESKTOP SYSTEMS    ",
+    "ipManufacturer": "APPLE",
+    "productDescription": "MACSTUDIO E25 M4M/64/1TB",
+    "warranty": "1 year",
+    "asteaWarranty": "1YearVendor",
+    "vendorStyle": "15098309",
+    "image1": "",
+    "image2": "",
+    "image3": "",
+    "image4": ""
+  },
+  "channel": "ecommerce",
+  "brand_voice": {
+    "tone": "professional",
+    "keywords": ["Mac Studio", "M4 Max", "workstation"],
+    "locale": "en-GB"
+  }
+}
+```
+
+`brand_voice` is optional. The `pim_record` accepts all ~50 PIM export fields — only the fields present in the sample data are required; missing fields default to empty strings.
+
+**Field mapping applied by the adapter:**
+
+| PIM field | Maps to |
+|---|---|
+| `productID` | `id` (cast to string) |
+| `shortSku` | `sku` |
+| `productName` | `name` |
+| `coordGroupDescription` | `category` (trailing spaces stripped) |
+| `ipManufacturer` | `attributes.brand` |
+| `marketingCopy` / `productDescription` / `posDescription` | `existing_description` (first non-empty value that differs from the product name) |
+| `warranty` | `attributes.additional["warranty"]` |
+| `asteaWarranty` | `attributes.additional["astea_warranty"]` |
+| `vendorStyle` | `attributes.additional["vendor_part_number"]` |
+| `upc` | `attributes.additional["upc"]` |
+| `deviceType` | `attributes.additional["device_type"]` |
+| `platform` | `attributes.additional["platform"]` |
+| `image1`–`image4` | `image_urls` (empty strings filtered out) |
+| `attribute38`–`attribute47` | `attributes.additional` (non-empty slots only) |
+
+Response is the same `DescriptionResult` as `POST /generate-description`.
+
+---
+
+---
+
+### List all available models
+
+```
+GET /models/available
+```
+
+Returns the full catalogue of models supported by the provider layer, grouped by provider.
+
+```json
+{
+  "anthropic": ["claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5-20251001"],
+  "openai": ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "o1", "o1-mini", "o3-mini", "o4-mini"],
+  "google": ["gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash"]
+}
+```
+
+---
+
+### Assign a model to any agent
+
+```
+POST /agents/{agent_name}/model
+Content-Type: application/json
+```
+
+```json
+{ "model": "gpt-4o" }
+```
+
+Takes effect immediately — no restart required. Any agent registered under `agent_name` in the registry will use the new model on its next LLM call.
+
+| HTTP status | Meaning |
+|---|---|
+| 200 | Model assigned |
+| 400 | Model prefix not recognised by any provider |
+
+Response:
+
+```json
+{ "agent": "content", "model": "gpt-4o" }
+```
+
+---
+
+### View all agent model assignments
+
+```
+GET /agents/models
+```
+
+Returns every agent that has been explicitly assigned a model, plus the default fallback from `.env`.
+
+```json
+{
+  "registry": {
+    "content": "gpt-4o",
+    "catalog": "gemini-2.0-flash"
+  },
+  "default_model": "claude-sonnet-4-6"
+}
+```
+
+Agents not listed in `registry` automatically use `default_model`.
+
+---
+
+### Reset an agent to the default model
+
+```
+DELETE /agents/{agent_name}/model
+```
+
+Removes the explicit assignment. The agent reverts to `default_model` from `.env`.
+
+```json
+{ "agent": "content", "model": "claude-sonnet-4-6" }
+```
+
+---
+
 ### Example: Switch to GPT-4o then generate
 
 ```bash
@@ -275,6 +421,25 @@ curl -X POST http://localhost:8001/generate-description \
   }'
 ```
 
+### Example: Generate directly from PIM export data
+
+```bash
+curl -X POST http://localhost:8001/pim/generate-description \
+  -H "Content-Type: application/json" \
+  -d '{
+    "pim_record": {
+      "productID": 705511,
+      "shortSku": "968909",
+      "productName": "2-BAY NASYNC DH2300",
+      "coordGroupDescription": "SMB NETWORK/NAS DRV ENCL",
+      "ipManufacturer": "UGREEN",
+      "warranty": "1 year",
+      "vendorStyle": "95432"
+    },
+    "channel": "ecommerce"
+  }'
+```
+
 ---
 
 ## 6. Directory Structure
@@ -290,7 +455,16 @@ ai_agent_microservice/
 ├── pim_core/                     # Shared infrastructure — never imports from agents/
 │   ├── config.py                 # Settings singleton — loads .env via pydantic-settings
 │   ├── schemas/
-│   │   └── product.py            # Pydantic models: Product, BrandVoice, DescriptionResult
+│   │   ├── product.py            # Pydantic models: Product, BrandVoice, DescriptionResult
+│   │   └── pim_product.py        # PIMProductRecord — mirrors raw PIM export fields
+│   ├── adapters/
+│   │   └── pim_adapter.py        # pim_record_to_product() — PIM → Product mapping
+│   ├── utils/
+│   │   ├── all_available_models.py  # Enums: AllAvailableModelsAnthropic/OpenAI/Google
+│   │   └── all_agents.py            # Enum: AllAgents — register agents here first
+│   ├── db/
+│   │   ├── agent_model_db.py     # SQLite helpers: load_all / upsert / delete
+│   │   └── agent_models.db       # SQLite database file (auto-created, not committed)
 │   └── llm/
 │       ├── client.py             # Provider-agnostic LLMClient — the public interface
 │       ├── factory.py            # Routes model names to provider instances (factory pattern)
@@ -303,9 +477,11 @@ ai_agent_microservice/
 │
 ├── agents/
 │   └── product_description_generator/  # Product Description Generator Agent
-│       ├── main.py               # FastAPI app — mounts routes, defines /generate-description
+│       ├── main.py               # FastAPI app — mounts all routers
 │       ├── routes/
-│       │   └── model_config.py   # GET/POST /config/model — runtime model switching API
+│       │   ├── model_config.py   # GET/POST /config/model — model switching (scoped to "content")
+│       │   ├── pim_ingest.py     # POST /pim/generate-description — raw PIM record ingestion
+│       │   └── agent_registry.py # GET /models/available · POST|GET|DELETE /agents/* — global registry API
 │       ├── workflows/
 │       │   └── description_workflow.py  # LangGraph StateGraph — orchestrates the LLM call
 │       ├── tools/
@@ -720,7 +896,7 @@ venv/bin/python -m pytest tests/test_llm_factory.py tests/test_llm_registry.py t
 venv/bin/python -m pytest --cov=. --cov-report=term-missing
 ```
 
-Expected output: **48 passed**.
+Expected output: **85 passed**.
 
 No real API calls are made during tests. All LLM interactions are mocked.
 
@@ -829,6 +1005,11 @@ Understanding what is shared and what is agent-specific is critical when adding 
 |---|---|
 | `pim_core/config.py` | `settings` singleton — API keys, default model name, environment, log level |
 | `pim_core/schemas/product.py` | `Product`, `ProductAttributes`, `BrandVoice`, `DescriptionResult` — shared data contracts |
+| `pim_core/schemas/pim_product.py` | `PIMProductRecord` — Pydantic model mirroring all ~50 raw PIM export fields (`extra = "allow"` for forward compatibility) |
+| `pim_core/adapters/pim_adapter.py` | `pim_record_to_product()` — adapter that maps a raw `PIMProductRecord` → normalised `Product` (strips trailing spaces, filters empty images, skips redundant descriptions) |
+| `pim_core/utils/all_available_models.py` | `AllAvailableModelsAnthropic`, `AllAvailableModelsOpenAI`, `AllAvailableModelsGoogle` enums — single source of truth for every supported model name |
+| `pim_core/utils/all_agents.py` | `AllAgents` enum — register every agent here before building it; used everywhere instead of bare string literals |
+| `pim_core/db/agent_model_db.py` | SQLite persistence layer — `load_all()`, `upsert()`, `delete()` for agent → model assignments |
 | `pim_core/llm/client.py` | `llm_client` — provider-agnostic async LLM caller. One line to call any LLM |
 | `pim_core/llm/factory.py` | `get_provider(model_name)` — routes model name prefix to the correct provider instance |
 | `pim_core/llm/registry.py` | `agent_model_registry` — runtime map of which LLM each agent is currently using |
@@ -847,6 +1028,8 @@ Everything inside `agents/product_description_generator/` is exclusively owned b
 |---|---|
 | `agents/product_description_generator/main.py` | This agent's own FastAPI application and HTTP server |
 | `agents/product_description_generator/routes/model_config.py` | Model switching API scoped to the `"content"` agent name in the registry |
+| `agents/product_description_generator/routes/pim_ingest.py` | `POST /pim/generate-description` — accepts a raw PIM record, runs the shared adapter, then calls the same generation pipeline |
+| `agents/product_description_generator/routes/agent_registry.py` | `GET /models/available` · `POST/GET/DELETE /agents/*` — global model assignment and registry view |
 | `agents/product_description_generator/tools/generate_description.py` | The `generate_description` FastMCP tool — content-specific logic |
 | `agents/product_description_generator/workflows/description_workflow.py` | LangGraph `StateGraph` wired for product description generation |
 | `agents/product_description_generator/prompts/brand_voice.py` | Prompt builders using `BrandVoice` — specific to product copywriting |
@@ -859,7 +1042,15 @@ Everything inside `agents/product_description_generator/` is exclusively owned b
 pim_core/                          ← SHARED — used by ALL agents
 ├── config.py                          Settings singleton
 ├── schemas/
-│   └── product.py                     Product, BrandVoice, DescriptionResult
+│   ├── product.py                     Product, BrandVoice, DescriptionResult
+│   └── pim_product.py                 PIMProductRecord (raw PIM export schema)
+├── adapters/
+│   └── pim_adapter.py                 pim_record_to_product() adapter
+├── utils/
+│   ├── all_available_models.py        AllAvailableModelsAnthropic/OpenAI/Google enums
+│   └── all_agents.py                  AllAgents enum — register agents here first
+├── db/
+│   └── agent_model_db.py              SQLite persistence for agent→model assignments
 └── llm/
     ├── client.py                      LLMClient (provider-agnostic)
     ├── factory.py                     get_provider() factory
@@ -873,7 +1064,10 @@ pim_core/                          ← SHARED — used by ALL agents
 agents/
 ├── product_description_generator/ ← PRODUCT DESCRIPTION GENERATOR only
 │   ├── main.py
-│   ├── routes/model_config.py
+│   ├── routes/
+│   │   ├── model_config.py
+│   │   ├── pim_ingest.py              POST /pim/generate-description
+│   │   └── agent_registry.py          GET /models/available · POST|GET|DELETE /agents/*
 │   ├── tools/generate_description.py
 │   ├── workflows/description_workflow.py
 │   └── prompts/brand_voice.py
