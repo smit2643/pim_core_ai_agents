@@ -6,8 +6,9 @@ from typing import TypedDict
 
 from langgraph.graph import END, StateGraph
 
-from agents.content.prompts.brand_voice import get_system_prompt, get_user_message
+from agents.product_description_generator.prompts.brand_voice import get_system_prompt, get_user_message
 from pim_core.llm.client import llm_client
+from pim_core.llm.registry import agent_model_registry
 from pim_core.schemas.product import BrandVoice, Product
 
 logger = logging.getLogger(__name__)
@@ -24,12 +25,14 @@ class DescriptionState(TypedDict):
 
 
 async def generate_node(state: DescriptionState) -> dict:
-    """Call Claude API with a product + brand voice prompt and parse the JSON response."""
+    """Call the assigned LLM with a product + brand voice prompt and parse the JSON."""
+    model = agent_model_registry.get("content")
     system_prompt = get_system_prompt(state["brand_voice"])
     user_message = get_user_message(state["product"], state["channel"])
 
     logger.info(
-        "Calling LLM for product %s on channel %s",
+        "Calling LLM model '%s' for product %s on channel %s",
+        model,
         state["product"].id,
         state["channel"],
     )
@@ -38,6 +41,7 @@ async def generate_node(state: DescriptionState) -> dict:
         raw_text = await llm_client.complete(
             system=system_prompt,
             messages=[{"role": "user", "content": user_message}],
+            model=model,
             max_tokens=800,
         )
         parsed = json.loads(raw_text)

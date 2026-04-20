@@ -13,12 +13,12 @@ async def test_generate_description_returns_result(sample_product, sample_brand_
     })
 
     with patch(
-        "agents.content.workflows.description_workflow.llm_client.complete",
+        "agents.product_description_generator.workflows.description_workflow.llm_client.complete",
         new_callable=AsyncMock,
     ) as mock_llm:
         mock_llm.return_value = mock_response
 
-        from agents.content.tools.generate_description import generate_description
+        from agents.product_description_generator.tools.generate_description import generate_description
         result = await generate_description(
             product=sample_product,
             channel="ecommerce",
@@ -44,12 +44,12 @@ async def test_generate_description_uses_default_brand_voice(sample_product):
     })
 
     with patch(
-        "agents.content.workflows.description_workflow.llm_client.complete",
+        "agents.product_description_generator.workflows.description_workflow.llm_client.complete",
         new_callable=AsyncMock,
     ) as mock_llm:
         mock_llm.return_value = mock_response
 
-        from agents.content.tools.generate_description import generate_description
+        from agents.product_description_generator.tools.generate_description import generate_description
         result = await generate_description(product=sample_product, channel="wholesale")
 
     assert result.channel == "wholesale"
@@ -60,12 +60,12 @@ async def test_generate_description_uses_default_brand_voice(sample_product):
 async def test_generate_description_raises_on_llm_error(sample_product, sample_brand_voice):
     """generate_description raises ValueError when the workflow returns an error."""
     with patch(
-        "agents.content.workflows.description_workflow.llm_client.complete",
+        "agents.product_description_generator.workflows.description_workflow.llm_client.complete",
         new_callable=AsyncMock,
     ) as mock_llm:
         mock_llm.return_value = "not valid json"
 
-        from agents.content.tools.generate_description import generate_description
+        from agents.product_description_generator.tools.generate_description import generate_description
         with pytest.raises(ValueError, match="Failed to parse LLM response"):
             await generate_description(
                 product=sample_product,
@@ -87,12 +87,12 @@ async def test_generate_description_word_count_matches_description(
     })
 
     with patch(
-        "agents.content.workflows.description_workflow.llm_client.complete",
+        "agents.product_description_generator.workflows.description_workflow.llm_client.complete",
         new_callable=AsyncMock,
     ) as mock_llm:
         mock_llm.return_value = mock_response
 
-        from agents.content.tools.generate_description import generate_description
+        from agents.product_description_generator.tools.generate_description import generate_description
         result = await generate_description(
             product=sample_product,
             channel="ecommerce",

@@ -13,12 +13,12 @@ async def test_workflow_returns_title_and_description(sample_product, sample_bra
     })
 
     with patch(
-        "agents.content.workflows.description_workflow.llm_client.complete",
+        "agents.product_description_generator.workflows.description_workflow.llm_client.complete",
         new_callable=AsyncMock,
     ) as mock_llm:
         mock_llm.return_value = mock_response
 
-        from agents.content.workflows.description_workflow import description_graph
+        from agents.product_description_generator.workflows.description_workflow import description_graph
         result = await description_graph.ainvoke({
             "product": sample_product,
             "channel": "ecommerce",
@@ -44,12 +44,12 @@ async def test_workflow_returns_seo_keywords(sample_product, sample_brand_voice)
     })
 
     with patch(
-        "agents.content.workflows.description_workflow.llm_client.complete",
+        "agents.product_description_generator.workflows.description_workflow.llm_client.complete",
         new_callable=AsyncMock,
     ) as mock_llm:
         mock_llm.return_value = mock_response
 
-        from agents.content.workflows.description_workflow import description_graph
+        from agents.product_description_generator.workflows.description_workflow import description_graph
         result = await description_graph.ainvoke({
             "product": sample_product,
             "channel": "ecommerce",
@@ -67,12 +67,12 @@ async def test_workflow_returns_seo_keywords(sample_product, sample_brand_voice)
 async def test_workflow_sets_error_on_invalid_json(sample_product, sample_brand_voice):
     """Workflow sets error key when LLM returns unparseable text."""
     with patch(
-        "agents.content.workflows.description_workflow.llm_client.complete",
+        "agents.product_description_generator.workflows.description_workflow.llm_client.complete",
         new_callable=AsyncMock,
     ) as mock_llm:
         mock_llm.return_value = "Sorry, I cannot help with that."
 
-        from agents.content.workflows.description_workflow import description_graph
+        from agents.product_description_generator.workflows.description_workflow import description_graph
         result = await description_graph.ainvoke({
             "product": sample_product,
             "channel": "ecommerce",
@@ -93,12 +93,12 @@ async def test_workflow_sets_error_on_missing_title_key(sample_product, sample_b
     mock_response = json.dumps({"description": "ok", "seo_keywords": []})
 
     with patch(
-        "agents.content.workflows.description_workflow.llm_client.complete",
+        "agents.product_description_generator.workflows.description_workflow.llm_client.complete",
         new_callable=AsyncMock,
     ) as mock_llm:
         mock_llm.return_value = mock_response
 
-        from agents.content.workflows.description_workflow import description_graph
+        from agents.product_description_generator.workflows.description_workflow import description_graph
         result = await description_graph.ainvoke({
             "product": sample_product,
             "channel": "ecommerce",

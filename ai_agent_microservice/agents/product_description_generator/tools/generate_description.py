@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastmcp import FastMCP
 
-from agents.content.workflows.description_workflow import description_graph
+from agents.product_description_generator.workflows.description_workflow import description_graph
 from pim_core.config import settings
 from pim_core.schemas.product import BrandVoice, DescriptionResult, Product
 
