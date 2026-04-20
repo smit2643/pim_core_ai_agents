@@ -3,10 +3,12 @@ from __future__ import annotations
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
+from agents.content.routes.model_config import router as model_config_router
 from agents.content.tools.generate_description import generate_description
 from pim_core.schemas.product import BrandVoice, DescriptionResult, Product
 
 app = FastAPI(title="Content Agent", version="1.0.0")
+app.include_router(model_config_router)
 
 
 class GenerateDescriptionRequest(BaseModel):

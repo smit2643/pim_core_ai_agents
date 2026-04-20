@@ -1,15 +1,14 @@
 from __future__ import annotations
 
-import anthropic
-
-from pim_core.config import settings
+from pim_core.llm.factory import get_provider
 
 
 class LLMClient:
-    """Thin async wrapper around AsyncAnthropic shared across all agents."""
+    """Provider-agnostic async LLM client.
 
-    def __init__(self) -> None:
-        self._client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+    Delegates to the appropriate provider based on the model name.
+    Defaults to settings.claude_model when no model is specified.
+    """
 
     async def complete(
         self,
@@ -18,14 +17,16 @@ class LLMClient:
         model: str | None = None,
         max_tokens: int = 1024,
     ) -> str:
-        """Call Claude and return the text of the first content block."""
-        response = await self._client.messages.create(
-            model=model or settings.claude_model,
-            max_tokens=max_tokens,
+        """Call the LLM and return the response text."""
+        from pim_core.config import settings
+        model_name = model or settings.claude_model
+        provider = get_provider(model_name)
+        return await provider.complete(
+            model=model_name,
             system=system,
             messages=messages,
+            max_tokens=max_tokens,
         )
-        return response.content[0].text
 
 
 llm_client = LLMClient()
