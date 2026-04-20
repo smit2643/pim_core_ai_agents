@@ -6,7 +6,7 @@ from typing import TypedDict
 
 from langgraph.graph import END, StateGraph
 
-from agents.content.prompts.brand_voice import get_system_prompt, get_user_message
+from agents.product_description_generator.prompts.brand_voice import get_system_prompt, get_user_message
 from pim_core.llm.client import llm_client
 from pim_core.llm.registry import agent_model_registry
 from pim_core.schemas.product import BrandVoice, Product

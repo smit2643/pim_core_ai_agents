@@ -19,7 +19,7 @@ venv/bin/python -m pytest tests/ -v
 ## Running the Content Agent
 
 ```bash
-venv/bin/python -m uvicorn agents.content.main:app --reload --port 8002
+venv/bin/python -m uvicorn agents.product_description_generator.main:app --reload --port 8002
 ```
 
 ## Environment variables

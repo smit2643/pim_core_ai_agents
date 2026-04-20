@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 @pytest.mark.asyncio
 async def test_health_endpoint_returns_ok():
     """GET /health returns status ok and agent name."""
-    from agents.content.main import app
+    from agents.product_description_generator.main import app
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.get("/health")
     assert response.status_code == 200
@@ -24,12 +24,12 @@ async def test_generate_description_endpoint_success(sample_product, sample_bran
     })
 
     with patch(
-        "agents.content.workflows.description_workflow.llm_client.complete",
+        "agents.product_description_generator.workflows.description_workflow.llm_client.complete",
         new_callable=AsyncMock,
     ) as mock_llm:
         mock_llm.return_value = mock_response
 
-        from agents.content.main import app
+        from agents.product_description_generator.main import app
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client:
@@ -61,12 +61,12 @@ async def test_generate_description_endpoint_without_brand_voice(sample_product)
     })
 
     with patch(
-        "agents.content.workflows.description_workflow.llm_client.complete",
+        "agents.product_description_generator.workflows.description_workflow.llm_client.complete",
         new_callable=AsyncMock,
     ) as mock_llm:
         mock_llm.return_value = mock_response
 
-        from agents.content.main import app
+        from agents.product_description_generator.main import app
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client:
@@ -88,12 +88,12 @@ async def test_generate_description_endpoint_llm_error_returns_422(
 ):
     """POST /generate-description returns 422 when LLM response is invalid JSON."""
     with patch(
-        "agents.content.workflows.description_workflow.llm_client.complete",
+        "agents.product_description_generator.workflows.description_workflow.llm_client.complete",
         new_callable=AsyncMock,
     ) as mock_llm:
         mock_llm.return_value = "not valid json"
 
-        from agents.content.main import app
+        from agents.product_description_generator.main import app
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client:

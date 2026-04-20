@@ -160,7 +160,7 @@ services:
   postgres:         # Shared DB + pgvector
   redis:            # Shared — ARQ queues, HITL pub/sub, caching
   catalog:          # agents/catalog — port 8001
-  content:          # agents/content — port 8002
+  content:          # agents/product_description_generator — port 8002
   procurement:      # agents/procurement — port 8003
   catalog_worker:   # ARQ worker for catalog background jobs
   content_worker:   # ARQ worker for content background jobs

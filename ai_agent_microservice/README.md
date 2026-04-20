@@ -18,6 +18,7 @@ A production-ready FastAPI microservice that powers AI agents for a Product Info
 10. [Theory and References](#10-theory-and-references)
 11. [Running Tests](#11-running-tests)
 12. [Knowledge Graph (graphify)](#12-knowledge-graph-graphify)
+13. [Shared vs Agent-Specific Code](#13-shared-vs-agent-specific-code)
 
 ---
 
@@ -134,7 +135,7 @@ All configuration is loaded from `.env` at startup via `pim_core/config.py` usin
 Run from inside the `ai_agent_microservice/` directory:
 
 ```bash
-venv/bin/python -m uvicorn agents.content.main:app --reload --port 8001
+venv/bin/python -m uvicorn agents.product_description_generator.main:app --reload --port 8001
 ```
 
 The `--reload` flag enables hot-reloading during development — the server restarts automatically when you change a source file. Remove it for production.
@@ -356,19 +357,19 @@ Wraps `openai.AsyncOpenAI`. Uses lazy imports — the `openai` package is not im
 **`pim_core/llm/providers/google_provider.py`**
 Wraps `google.generativeai`. Same lazy import pattern as OpenAI. Converts the shared message format into Gemini's format (role must be `"user"` or `"model"`, content goes in a `parts` array).
 
-**`agents/content/main.py`**
+**`agents/product_description_generator/main.py`**
 The FastAPI application entry point for the Content Agent. Mounts the model config router and defines the `POST /generate-description` endpoint. Thin — all logic lives in the tool and workflow layers below.
 
-**`agents/content/routes/model_config.py`**
+**`agents/product_description_generator/routes/model_config.py`**
 Implements `GET /config/model` and `POST /config/model`. `GET` reads the current assignment from the registry. `POST` validates the model prefix is supported before writing to the registry. Returns `400` with a clear error if the prefix is unknown.
 
-**`agents/content/workflows/description_workflow.py`**
+**`agents/product_description_generator/workflows/description_workflow.py`**
 A LangGraph `StateGraph` with a single node: `generate_node`. This node reads the current model from the registry, builds the prompt, calls the LLM via `LLMClient`, and parses the JSON response. Errors are caught inside the node and stored in `state["error"]` rather than being raised — this keeps the graph always terminating cleanly.
 
-**`agents/content/tools/generate_description.py`**
+**`agents/product_description_generator/tools/generate_description.py`**
 A FastMCP tool that is the public entry point invoked by the FastAPI endpoint. It initialises the graph state, runs the graph with `ainvoke()`, checks for errors, and assembles the final `DescriptionResult`.
 
-**`agents/content/prompts/brand_voice.py`**
+**`agents/product_description_generator/prompts/brand_voice.py`**
 Pure functions that build the system prompt and user message from a `BrandVoice` and `Product`. No LLM calls here — just string assembly. Kept separate so prompts can be read, tested, and iterated on without touching the workflow.
 
 ---
@@ -388,7 +389,7 @@ Three Pydantic models define the data contract:
 - `BrandVoice` — how the generated copy should sound (tone, keywords to include, words to avoid, length limits, locale)
 - `DescriptionResult` — the structured output (title, description, seo_keywords, word_count, model_used)
 
-**Prompt builders (`agents/content/prompts/brand_voice.py`)**
+**Prompt builders (`agents/product_description_generator/prompts/brand_voice.py`)**
 
 Two pure functions:
 - `get_system_prompt(brand_voice)` — builds the LLM system prompt. Tells the model it is a product copywriter, sets tone, length constraints, locale, and instructs it to respond only with valid JSON in a specific format.
@@ -396,7 +397,7 @@ Two pure functions:
 
 Keeping prompts in their own module means they can be iterated without touching the orchestration graph.
 
-**LangGraph workflow (`agents/content/workflows/description_workflow.py`)**
+**LangGraph workflow (`agents/product_description_generator/workflows/description_workflow.py`)**
 
 A `StateGraph` with one node (`generate_node`) and one edge to `END`. The state is a `TypedDict` carrying: product, channel, brand_voice, title, description, seo_keywords, and error.
 
@@ -408,11 +409,11 @@ A `StateGraph` with one node (`generate_node`) and one edge to `END`. The state 
 
 Errors are caught inside the node rather than raising mid-graph. This ensures the graph always reaches `END` cleanly — the caller checks `state["error"]` after the graph finishes.
 
-**FastMCP tool (`agents/content/tools/generate_description.py`)**
+**FastMCP tool (`agents/product_description_generator/tools/generate_description.py`)**
 
 Wraps the graph in a FastMCP `@mcp.tool()` decorated function. Initialises the state dict, calls `description_graph.ainvoke(state)`, raises `ValueError` if `state["error"]` is set, otherwise assembles and returns `DescriptionResult`.
 
-**FastAPI app (`agents/content/main.py`)**
+**FastAPI app (`agents/product_description_generator/main.py`)**
 
 Exposes two endpoints:
 - `GET /health` — liveness check
@@ -481,11 +482,11 @@ The `get()` method imports `settings` lazily (inside the method body) to avoid c
 
 The client now delegates to the factory instead of constructing an `AsyncAnthropic` directly. It accepts an optional `model` parameter. If no model is passed, it falls back to `settings.claude_model`. This makes it provider-agnostic.
 
-**Workflow update (`agents/content/workflows/description_workflow.py`)**
+**Workflow update (`agents/product_description_generator/workflows/description_workflow.py`)**
 
 `generate_node` now calls `agent_model_registry.get("content")` to discover its current model before calling the LLM. This is the line that connects the runtime registry to the LLM call.
 
-**Model config router (`agents/content/routes/model_config.py`)**
+**Model config router (`agents/product_description_generator/routes/model_config.py`)**
 
 Two endpoints:
 - `GET /config/model` — reads from `agent_model_registry.get("content")`
@@ -513,7 +514,7 @@ Validation happens before writing to the registry. If the prefix is unknown, a `
   POST /generate-description          POST /config/model
   GET  /health                        GET  /config/model
                 │                               │
-                │        agents/content/main.py │
+                │        agents/product_description_generator/main.py │
                 │        (FastAPI application)  │
                 │                               │
                 ▼                               ▼
@@ -668,7 +669,7 @@ The system prompt in `brand_voice.py` follows structured prompt design:
 
 **Where to patch in Python tests**
 
-A critical subtlety in the test suite: when a module does `from pim_core.llm.factory import get_provider`, Python creates a local name binding in that module's namespace. Patching `pim_core.llm.factory.get_provider` does not affect that local binding. You must patch the name where it is used: `agents.content.routes.model_config.get_provider`.
+A critical subtlety in the test suite: when a module does `from pim_core.llm.factory import get_provider`, Python creates a local name binding in that module's namespace. Patching `pim_core.llm.factory.get_provider` does not affect that local binding. You must patch the name where it is used: `agents.product_description_generator.routes.model_config.get_provider`.
 
 This is documented in the Python standard library under "Where to Patch":
 
@@ -710,7 +711,7 @@ From inside `ai_agent_microservice/`:
 venv/bin/python -m pytest -v
 
 # Run only Content Agent tests
-venv/bin/python -m pytest tests/content/ -v
+venv/bin/python -m pytest tests/product_description_generator/ -v
 
 # Run only LLM layer tests
 venv/bin/python -m pytest tests/test_llm_factory.py tests/test_llm_registry.py tests/test_llm_client.py -v
@@ -809,3 +810,87 @@ The graph as of the last run covers:
 - **516 edges** — 66% extracted directly from source, 34% inferred by Claude
 - **14 meaningful communities** — Content Agent Runtime, LLM Provider Layer, Model Config & Registry, Prompt Engineering, Agent Development Roadmap, Customer & Business Signals, and more
 - **Top god nodes:** `BrandVoice` (20 edges), `Product` (19), `AgentModelRegistry` (17), `get_provider()` (12)
+
+---
+
+## 13. Shared vs Agent-Specific Code
+
+> **Maintainer note:** Update this section every time a new agent is added or a new shared module is introduced in `pim_core/`.
+
+Understanding what is shared and what is agent-specific is critical when adding new agents (Catalog, Procurement, etc.). The rule is simple: **if it lives in `pim_core/`, it belongs to everyone. If it lives in `agents/<name>/`, it belongs to that agent alone.**
+
+---
+
+### Shared — any agent can use this (`pim_core/`)
+
+`pim_core/` is the shared foundation. No individual agent owns any file inside it. When you build a new agent, import from here — never from another agent's directory.
+
+| File | What it provides |
+|---|---|
+| `pim_core/config.py` | `settings` singleton — API keys, default model name, environment, log level |
+| `pim_core/schemas/product.py` | `Product`, `ProductAttributes`, `BrandVoice`, `DescriptionResult` — shared data contracts |
+| `pim_core/llm/client.py` | `llm_client` — provider-agnostic async LLM caller. One line to call any LLM |
+| `pim_core/llm/factory.py` | `get_provider(model_name)` — routes model name prefix to the correct provider instance |
+| `pim_core/llm/registry.py` | `agent_model_registry` — runtime map of which LLM each agent is currently using |
+| `pim_core/llm/providers/base.py` | `BaseLLMProvider` ABC — the interface every provider must implement |
+| `pim_core/llm/providers/anthropic_provider.py` | Anthropic Claude provider (`claude-*` models) |
+| `pim_core/llm/providers/openai_provider.py` | OpenAI provider (`gpt-*`, `o1-*`, `o3-*`, `o4-*` models) |
+| `pim_core/llm/providers/google_provider.py` | Google Gemini provider (`gemini-*` models) |
+
+---
+
+### Product Description Generator only (`agents/product_description_generator/`)
+
+Everything inside `agents/product_description_generator/` is exclusively owned by the Content Agent. No other agent should import from here.
+
+| File | Why it is specific to this agent |
+|---|---|
+| `agents/product_description_generator/main.py` | This agent's own FastAPI application and HTTP server |
+| `agents/product_description_generator/routes/model_config.py` | Model switching API scoped to the `"content"` agent name in the registry |
+| `agents/product_description_generator/tools/generate_description.py` | The `generate_description` FastMCP tool — content-specific logic |
+| `agents/product_description_generator/workflows/description_workflow.py` | LangGraph `StateGraph` wired for product description generation |
+| `agents/product_description_generator/prompts/brand_voice.py` | Prompt builders using `BrandVoice` — specific to product copywriting |
+
+---
+
+### Visual map
+
+```
+pim_core/                          ← SHARED — used by ALL agents
+├── config.py                          Settings singleton
+├── schemas/
+│   └── product.py                     Product, BrandVoice, DescriptionResult
+└── llm/
+    ├── client.py                      LLMClient (provider-agnostic)
+    ├── factory.py                     get_provider() factory
+    ├── registry.py                    AgentModelRegistry
+    └── providers/
+        ├── base.py                    BaseLLMProvider ABC
+        ├── anthropic_provider.py      Claude
+        ├── openai_provider.py         GPT
+        └── google_provider.py         Gemini
+
+agents/
+├── content/                       ← PRODUCT DESCRIPTION GENERATOR only
+│   ├── main.py
+│   ├── routes/model_config.py
+│   ├── tools/generate_description.py
+│   ├── workflows/description_workflow.py
+│   └── prompts/brand_voice.py
+│
+├── catalog/                       ← PLANNED — will import from pim_core/ only
+└── procurement/                   ← PLANNED — will import from pim_core/ only
+```
+
+---
+
+### Rule for adding a new agent
+
+When building `agents/catalog/` or `agents/procurement/`:
+
+1. Create `agents/<name>/main.py` — its own FastAPI app
+2. Create `agents/<name>/routes/model_config.py` — copy the pattern from `agents/product_description_generator/routes/model_config.py`, change `AGENT_NAME = "<name>"`
+3. Create `agents/<name>/workflows/`, `tools/`, `prompts/` — agent-specific logic only
+4. Import `llm_client`, `agent_model_registry`, `get_provider`, and all schemas from `pim_core/` — never from `agents/product_description_generator/`
+5. Add new shared schemas to `pim_core/schemas/` if multiple agents will need them
+6. Update this section of the README

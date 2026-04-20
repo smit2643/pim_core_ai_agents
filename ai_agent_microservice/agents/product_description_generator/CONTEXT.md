@@ -1,4 +1,4 @@
-# agents/content — Content & Enrichment Agent
+# agents/product_description_generator — Product Description Generator Agent
 
 FastAPI microservice (port 8002) that generates SEO-optimised product descriptions.
 
