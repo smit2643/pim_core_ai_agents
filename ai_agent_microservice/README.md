@@ -19,6 +19,7 @@ A production-ready FastAPI microservice that powers AI agents for a Product Info
 11. [Running Tests](#11-running-tests)
 12. [Knowledge Graph (graphify)](#12-knowledge-graph-graphify)
 13. [Shared vs Agent-Specific Code](#13-shared-vs-agent-specific-code)
+14. [Deep Dive — LangGraph, FastMCP, and How Everything Works Together](#14-deep-dive--langgraph-fastmcp-and-how-everything-works-together)
 
 ---
 
@@ -228,7 +229,9 @@ POST /agents/generate-description
 Content-Type: application/json
 ```
 
-Accepts a product record **exactly as exported from the PIM system** — no field mapping required by the caller. The adapter layer handles the conversion internally and feeds the same generation pipeline as `POST /generate-description`.
+Accepts a product record **exactly as exported from the PIM system** — no field mapping required by the caller. The adapter layer handles the conversion internally.
+
+The `pim_record` accepts exactly **13 fields** — all optional (empty string, empty array, or null are all valid). Any additional keys in the JSON payload are silently ignored.
 
 Request body:
 
@@ -236,18 +239,18 @@ Request body:
 {
   "pim_record": {
     "productID": 705517,
-    "shortSku": "969196",
     "productName": "MACSTUDIO E25 M4M/64/1TB",
-    "coordGroupDescription": "APPLE DESKTOP SYSTEMS    ",
+    "coordGroupDescription": "APPLE DESKTOP SYSTEMS",
     "ipManufacturer": "APPLE",
     "productDescription": "MACSTUDIO E25 M4M/64/1TB",
+    "copy1": "Apple Mac Studio with M4 Max chip — the most powerful desktop for pro workflows.",
+    "posDescription": "MACSTUDIO E25 M4M/64/1TB",
     "warranty": "1 year",
-    "asteaWarranty": "1YearVendor",
     "vendorStyle": "15098309",
-    "image1": "",
-    "image2": "",
-    "image3": "",
-    "image4": ""
+    "webManufacturer": "Apple Inc",
+    "suggestedWebcategory": "Computers<br />Desktop Computers",
+    "productType": "Hardware",
+    "categorySpecificAttributes": []
   },
   "channel": "ecommerce",
   "brand_voice": {
@@ -258,26 +261,27 @@ Request body:
 }
 ```
 
-`brand_voice` is optional. The `pim_record` accepts all ~50 PIM export fields — only the fields present in the sample data are required; missing fields default to empty strings.
+`brand_voice` is optional.
 
 **Field mapping applied by the adapter:**
 
-| PIM field | Maps to |
-|---|---|
-| `productID` | `id` (cast to string) |
-| `shortSku` | `sku` |
-| `productName` | `name` |
-| `coordGroupDescription` | `category` (trailing spaces stripped) |
-| `ipManufacturer` | `attributes.brand` |
-| `marketingCopy` / `productDescription` / `posDescription` | `existing_description` (first non-empty value that differs from the product name) |
-| `warranty` | `attributes.additional["warranty"]` |
-| `asteaWarranty` | `attributes.additional["astea_warranty"]` |
-| `vendorStyle` | `attributes.additional["vendor_part_number"]` |
-| `upc` | `attributes.additional["upc"]` |
-| `deviceType` | `attributes.additional["device_type"]` |
-| `platform` | `attributes.additional["platform"]` |
-| `image1`–`image4` | `image_urls` (empty strings filtered out) |
-| `attribute38`–`attribute47` | `attributes.additional` (non-empty slots only) |
+| PIM field | Maps to | Notes |
+|---|---|---|
+| `productID` | `Product.id` | Cast to string |
+| `productName` | `Product.name` | |
+| `coordGroupDescription` | `Product.category` | Trailing spaces stripped |
+| `ipManufacturer` | `Product.attributes.brand` | Empty string → `None` |
+| `copy1` | `existing_description` | 1st priority |
+| `productDescription` | `existing_description` | 2nd priority fallback |
+| `posDescription` | `existing_description` | 3rd priority fallback |
+| `warranty` | `additional["warranty"]` | Omitted if empty |
+| `vendorStyle` | `additional["vendor_part_number"]` | Omitted if empty |
+| `webManufacturer` | `additional["web_manufacturer"]` | Omitted if empty |
+| `suggestedWebcategory` | `additional["web_category"]` | Omitted if empty |
+| `productType` | `additional["product_type"]` | Omitted if empty |
+| `categorySpecificAttributes` | `additional["category_attributes"]` | JSON-serialised; omitted when `[]` |
+
+`existing_description` is set to the first of `copy1`, `productDescription`, `posDescription` that is non-empty **and** different from the product name (to avoid sending the LLM a description that just repeats the name).
 
 Response is the same `DescriptionResult` as `POST /generate-description`.
 
@@ -420,7 +424,7 @@ ai_agent_microservice/
 │   ├── config.py                 # Settings singleton — loads .env via pydantic-settings
 │   ├── schemas/
 │   │   ├── product.py            # Pydantic models: Product, BrandVoice, DescriptionResult
-│   │   └── pim_product.py        # PIMProductRecord — mirrors raw PIM export fields
+│   │   └── pim_product.py        # PIMProductRecord — 13 selected PIM fields (extra="ignore")
 │   ├── adapters/
 │   │   └── pim_adapter.py        # pim_record_to_product() — PIM → Product mapping
 │   ├── utils/
@@ -855,7 +859,7 @@ venv/bin/python -m pytest tests/test_llm_factory.py tests/test_llm_registry.py t
 venv/bin/python -m pytest --cov=. --cov-report=term-missing
 ```
 
-Expected output: **85 passed**.
+Expected output: **82 passed**.
 
 No real API calls are made during tests. All LLM interactions are mocked.
 
@@ -964,7 +968,7 @@ Understanding what is shared and what is agent-specific is critical when adding 
 |---|---|
 | `pim_core/config.py` | `settings` singleton — API keys, default model name, environment, log level |
 | `pim_core/schemas/product.py` | `Product`, `ProductAttributes`, `BrandVoice`, `DescriptionResult` — shared data contracts |
-| `pim_core/schemas/pim_product.py` | `PIMProductRecord` — Pydantic model mirroring all ~50 raw PIM export fields (`extra = "allow"` for forward compatibility) |
+| `pim_core/schemas/pim_product.py` | `PIMProductRecord` — 13 fields selected for description generation. `extra = "ignore"` silently drops any unrecognised keys in the raw payload |
 | `pim_core/adapters/pim_adapter.py` | `pim_record_to_product()` — adapter that maps a raw `PIMProductRecord` → normalised `Product` (strips trailing spaces, filters empty images, skips redundant descriptions) |
 | `pim_core/utils/all_available_models.py` | `AllAvailableModelsAnthropic`, `AllAvailableModelsOpenAI`, `AllAvailableModelsGoogle` enums — single source of truth for every supported model name |
 | `pim_core/utils/all_agents.py` | `AllAgents` enum — register every agent here before building it; used everywhere instead of bare string literals |
@@ -1045,5 +1049,505 @@ When building `agents/catalog/` or `agents/procurement/`:
 4. Use `AllAgents.<NAME>.value` everywhere as the registry key — never a bare string
 5. Import `llm_client`, `agent_model_registry`, `get_provider`, and all schemas from `pim_core/` — never from `agents/product_description_generator/`
 6. Assign a model via `POST /agents-settings/<name>/model` — no per-agent config route needed
-5. Add new shared schemas to `pim_core/schemas/` if multiple agents will need them
-6. Update this section of the README
+7. Add new shared schemas to `pim_core/schemas/` if multiple agents will need them
+8. Update this section of the README
+
+---
+
+## 14. Deep Dive — LangGraph, FastMCP, and How Everything Works Together
+
+> This section is for developers who are new to agent frameworks. It explains every layer of the system from scratch, using analogies from data engineering where helpful.
+
+---
+
+### The big picture — what problem are we solving?
+
+A product description generator sounds simple: take product data, send it to an LLM, get text back. You could do that in 10 lines of Python. So why does this project have workflows, tools, graphs, state, providers, and registries?
+
+**Because the naive 10-line version breaks down fast:**
+
+| Problem | What breaks in the naive version |
+|---|---|
+| You want to switch from Claude to GPT | Hard-coded `anthropic.Anthropic()` everywhere |
+| You want to run 100 requests at once | Blocking `requests.post()` blocks the whole process |
+| The LLM returns malformed JSON | Unhandled exception crashes the request |
+| You want to add a "retry with better prompt" step | No structure to add steps to |
+| You want to know which model generated each result | No tracking |
+| A second agent needs to call the same LLM | Copy-paste the LLM code everywhere |
+
+Each layer in this project solves one of these problems. Understanding why each layer exists makes the architecture obvious.
+
+---
+
+### Layer 1 — FastAPI: receiving the HTTP request
+
+FastAPI is a Python web framework for building REST APIs. If you have used Flask or Django, FastAPI is similar but with two key additions:
+- **Automatic data validation** via Pydantic — if the request body is malformed, FastAPI rejects it before your code even runs
+- **Async support** — requests don't block each other (explained below)
+
+When you hit `POST /agents/generate-description`, FastAPI:
+1. Reads the raw JSON body
+2. Validates it against `PIMIngestRequest` (a Pydantic model)
+3. If valid, calls the route handler function
+4. If invalid, returns a 422 error automatically — no code needed
+
+```python
+# routes/product_description_generator_api_route.py
+@router.post("/generate-description", response_model=DescriptionResult)
+async def generate_description_from_pim(request: PIMIngestRequest):
+    product = pim_record_to_product(request.pim_record)  # step 1: adapt
+    return await generate_description(                    # step 2: generate
+        product=product,
+        channel=request.channel,
+        brand_voice=request.brand_voice,
+    )
+```
+
+There is no business logic here. The route handler does two things: adapt the raw input into a clean `Product`, and call the FastMCP tool.
+
+---
+
+### Layer 2 — Pydantic: data contracts
+
+Pydantic is a Python library for defining and validating data structures using type hints.
+
+Think of a Pydantic model like a database schema — it defines exactly what shape the data must have:
+
+```python
+class PIMProductRecord(BaseModel):
+    productID: int = 0          # must be an integer, defaults to 0
+    productName: str = ""       # must be a string, defaults to empty
+    categorySpecificAttributes: list[Any] = []  # must be a list
+
+    model_config = {"extra": "ignore"}  # unknown fields are silently dropped
+```
+
+When FastAPI receives a request, it passes the raw JSON to Pydantic. Pydantic:
+- Coerces types where safe (`"705517"` → `705517` if the field is `int`)
+- Rejects the request with a clear error if a required field is the wrong type
+- Drops fields not in the model (because `extra = "ignore"`)
+
+This means **your actual business logic never sees invalid data**. The validation happens at the boundary.
+
+> **Data engineering analogy:** Pydantic is like a schema-enforced Kafka topic or a Delta table with enforced schema. Data that doesn't match the schema is rejected at the door.
+
+---
+
+### Layer 3 — The Adapter: translating raw PIM data into a clean Product
+
+The PIM system exports data in its own format — field names like `coordGroupDescription`, `ipManufacturer`, `copy1`. The LLM pipeline uses a clean, normalised `Product` schema.
+
+`pim_adapter.py` is the translation layer between them:
+
+```python
+def pim_record_to_product(record: PIMProductRecord) -> Product:
+    return Product(
+        id=str(record.productID),
+        name=record.productName.strip(),
+        category=record.coordGroupDescription.strip(),  # strip trailing spaces
+        attributes=ProductAttributes(
+            brand=record.ipManufacturer.strip() or None,
+            additional={...}
+        ),
+        existing_description=_pick_best_description(record),
+    )
+```
+
+This pattern is called the **Adapter Pattern**. The adapter converts one interface into another without changing either side. The PIM system doesn't know about `Product`. The LLM pipeline doesn't know about `coordGroupDescription`. The adapter is the only place that knows both.
+
+> **Data engineering analogy:** This is exactly what a staging layer does in a data warehouse — raw source data → normalised model. The adapter is the transformation step.
+
+---
+
+### Layer 4 — FastMCP: what is MCP and why is it here?
+
+**MCP (Model Context Protocol)** is an open standard created by Anthropic that defines how LLMs connect to external tools. Think of it as a USB standard — any LLM that speaks MCP can use any tool that exposes MCP, without custom integration code.
+
+**FastMCP** is a Python library that makes it easy to build MCP servers. You decorate a function with `@mcp.tool()` and FastMCP handles the protocol details.
+
+```python
+# tools/generate_description.py
+mcp = FastMCP("Content Agent")
+
+@mcp.tool()
+async def generate_description(
+    product: Product,
+    channel: str,
+    brand_voice: BrandVoice | None = None,
+) -> DescriptionResult:
+    """Generate an SEO-optimised title and description for a product."""
+    ...
+```
+
+**Why use FastMCP here instead of just calling a function directly?**
+
+In this project, the route handler does call the tool as a regular Python function. But using `@mcp.tool()` gives you:
+
+1. **Self-documentation** — the tool's docstring and type hints become the schema that any MCP client can discover automatically
+2. **Future compatibility** — if you want to expose this tool to a Claude agent that can call it by name (e.g. `use_mcp_tool("generate_description", {...})`), the server is already built
+3. **Separation of concerns** — the tool is the "what" (generate a description), the route is the "how the request arrived" (HTTP). They stay independent
+
+> **Interview answer:** "FastMCP registers the `generate_description` function as an MCP-compliant tool. This means the same function can be called by a FastAPI HTTP handler today, and by a Claude agent using the Model Context Protocol in the future, without any changes to the tool itself."
+
+---
+
+### Layer 5 — LangGraph: what is a StateGraph and why use it?
+
+LangGraph is a library for building agent workflows as **directed graphs**. Before explaining LangGraph, let's understand why a plain function call isn't enough.
+
+#### The problem with plain function calls
+
+If you were writing a simple pipeline in Python, you might write:
+
+```python
+def generate(product, channel, brand_voice):
+    prompt = build_prompt(product, channel, brand_voice)
+    raw = call_llm(prompt)
+    result = parse_json(raw)
+    return result
+```
+
+This works for a single step. But what if you want to:
+- **Retry** if the LLM returns invalid JSON?
+- **Add a review step** that checks the description before returning it?
+- **Branch** — generate a short description for mobile and a long one for desktop?
+- **Run steps in parallel** — generate title and description simultaneously?
+
+With plain functions, adding any of these requires rewriting the control flow. LangGraph solves this by making the workflow **explicit and composable**.
+
+#### What is a graph?
+
+A graph is a data structure with **nodes** (things) and **edges** (connections between things). You already use graphs constantly in data engineering — a DAG (Directed Acyclic Graph) in Airflow, dbt, or Spark is a graph.
+
+LangGraph's `StateGraph` works the same way:
+- **Nodes** are functions that do work
+- **Edges** are the connections that say "after this node, go to that node"
+- **State** is a shared dictionary that flows through every node
+
+#### The StateGraph in this project
+
+```python
+# workflows/description_workflow.py
+
+class DescriptionState(TypedDict):
+    product: Product
+    channel: str
+    brand_voice: BrandVoice
+    title: str
+    description: str
+    seo_keywords: list[str]
+    error: str | None
+
+graph_builder = StateGraph(DescriptionState)
+graph_builder.add_node("generate", generate_node)
+graph_builder.set_entry_point("generate")
+graph_builder.add_edge("generate", END)
+description_graph = graph_builder.compile()
+```
+
+**Breaking this down line by line:**
+
+`StateGraph(DescriptionState)` — creates a new graph where every node shares the same `DescriptionState` TypedDict. Think of the state as a row in a table that every node can read and write.
+
+`add_node("generate", generate_node)` — registers a node named `"generate"` that runs the `generate_node` function when reached.
+
+`set_entry_point("generate")` — the graph starts at this node.
+
+`add_edge("generate", END)` — after `"generate"` finishes, the graph ends. `END` is a LangGraph constant.
+
+`compile()` — converts the builder into a runnable graph object. This validates that all edges connect to real nodes, the entry point exists, etc.
+
+#### The node function
+
+```python
+async def generate_node(state: DescriptionState) -> dict:
+    model = agent_model_registry.get(AllAgents.PRODUCT_DESCRIPTION_GENERATOR.value)
+    system = get_system_prompt(state["brand_voice"])
+    user_msg = get_user_message(state["product"], state["channel"])
+
+    raw_text = await llm_client.complete(
+        model=model,
+        system=system,
+        messages=[{"role": "user", "content": user_msg}],
+        max_tokens=1200,
+    )
+
+    try:
+        parsed = json.loads(_extract_json(raw_text))
+        return {
+            "title": parsed["title"],
+            "description": parsed["description"],
+            "seo_keywords": parsed.get("seo_keywords", []),
+            "error": None,
+        }
+    except (json.JSONDecodeError, KeyError) as e:
+        return {"error": f"Failed to parse LLM response: {e}"}
+```
+
+**Key things to notice:**
+
+1. The node receives the **full state** and returns only the **fields it changes**. LangGraph merges the returned dict back into the state automatically.
+
+2. **Errors go into state, not exceptions.** If parsing fails, the node returns `{"error": "..."}` instead of raising. This ensures the graph always reaches `END` cleanly. The caller checks `state["error"]` afterwards.
+
+3. The node is `async` — it can be awaited and won't block other requests while waiting for the LLM.
+
+#### How ainvoke works
+
+```python
+# In the FastMCP tool:
+result_state = await description_graph.ainvoke(state)
+```
+
+`ainvoke` is the async version of `invoke`. It:
+1. Creates a copy of the initial state
+2. Runs the entry point node
+3. Follows edges to the next node (or `END`)
+4. Returns the final state
+
+The `a` prefix (`ainvoke`, `astream`, `aget`) consistently means "async" across LangGraph and LangChain.
+
+> **Data engineering analogy:** A LangGraph StateGraph is like an Airflow DAG. Tasks are nodes. Dependencies are edges. The state dict is like XCom — shared data passed between tasks. The difference is LangGraph is designed for LLM workflows and can branch, retry, and loop based on what the LLM returns.
+
+---
+
+### Layer 6 — The LLM abstraction: Client, Factory, Registry, Providers
+
+This is the most architecturally interesting part of the codebase. Let's trace what happens when `generate_node` calls `llm_client.complete(model="gpt-4o", ...)`.
+
+#### Step 1: LLMClient.complete()
+
+```python
+# pim_core/llm/client.py
+class LLMClient:
+    async def complete(self, model, system, messages, max_tokens=1024):
+        provider = get_provider(model)          # ask factory for the right provider
+        return await provider.complete(         # call it
+            model=model,
+            system=system,
+            messages=messages,
+            max_tokens=max_tokens,
+        )
+```
+
+`LLMClient` knows nothing about Anthropic, OpenAI, or Google. It just asks the factory for a provider and calls it. This is the **Strategy Pattern** — the strategy (which LLM to use) is injected at runtime.
+
+#### Step 2: get_provider() — the Factory
+
+```python
+# pim_core/llm/factory.py
+_ANTHROPIC_MODELS = frozenset(m.value for m in AllAvailableModelsAnthropic)
+_OPENAI_MODELS = frozenset(m.value for m in AllAvailableModelsOpenAI)
+_GOOGLE_MODELS = frozenset(m.value for m in AllAvailableModelsGoogle)
+_instances: dict[str, BaseLLMProvider] = {}
+
+def get_provider(model_name: str) -> BaseLLMProvider:
+    if model_name in _instances:
+        return _instances[model_name]          # return cached instance
+
+    if model_name in _ANTHROPIC_MODELS:
+        provider = AnthropicProvider()
+    elif model_name in _OPENAI_MODELS:
+        provider = OpenAIProvider()
+    elif model_name in _GOOGLE_MODELS:
+        provider = GoogleProvider()
+    else:
+        raise ValueError(f"No provider found for model '{model_name}'")
+
+    _instances[model_name] = provider          # cache it
+    return provider
+```
+
+The factory:
+- Decides **which class to instantiate** based on the model name
+- **Caches instances** so the SDK client is created once per process (not once per request)
+- Raises a clear error for unknown models
+
+This is the **Factory Pattern** — callers never write `AnthropicProvider()` themselves.
+
+#### Step 3: The providers — BaseLLMProvider ABC
+
+```python
+# pim_core/llm/providers/base.py
+from abc import ABC, abstractmethod
+
+class BaseLLMProvider(ABC):
+    @abstractmethod
+    async def complete(self, model, system, messages, max_tokens) -> str:
+        ...
+```
+
+`ABC` (Abstract Base Class) means you cannot instantiate `BaseLLMProvider` directly — it only defines the contract. Every concrete provider must implement `complete()` with exactly this signature.
+
+**Why this matters:** `LLMClient` is typed to accept `BaseLLMProvider`. It calls `provider.complete(...)`. It does not care which concrete class it gets. This is **polymorphism** — different classes share a common interface, and the caller doesn't need to know which one it has.
+
+#### Step 4: AgentModelRegistry
+
+```python
+# pim_core/llm/registry.py
+class AgentModelRegistry:
+    def __init__(self):
+        self._registry = agent_model_db.load_all()  # load from SQLite on startup
+
+    def get(self, agent_name: str) -> str:
+        if agent_name in self._registry:
+            return self._registry[agent_name]        # explicit assignment
+        return settings.claude_model                 # fallback to default
+
+    def set(self, agent_name: str, model_name: str) -> None:
+        self._registry[agent_name] = model_name
+        agent_model_db.upsert(agent_name, model_name)  # persist to SQLite
+
+agent_model_registry = AgentModelRegistry()  # module-level singleton
+```
+
+The registry is the bridge between the HTTP config API and the LLM call inside the workflow:
+
+```
+POST /agents-settings/product_description_generator/model {"model": "gpt-4o"}
+  → agent_model_registry.set("product_description_generator", "gpt-4o")
+    → SQLite write
+
+Next LLM call in generate_node:
+  → agent_model_registry.get("product_description_generator")
+  → returns "gpt-4o"
+  → llm_client.complete(model="gpt-4o", ...)
+  → OpenAIProvider.complete(...)
+  → OpenAI API
+```
+
+**SQLite persistence** means the assignment survives server restarts. Without it, every restart would reset all agents to the default Claude model.
+
+---
+
+### The complete data flow — step by step
+
+Here is every step from HTTP request to HTTP response, with the file responsible for each:
+
+```
+1.  HTTP POST /agents/generate-description
+    │   Raw JSON body arrives
+    │
+2.  routes/product_description_generator_api_route.py
+    │   FastAPI validates body against PIMIngestRequest (Pydantic)
+    │   Invalid? → 422 error returned immediately
+    │
+3.  pim_core/adapters/pim_adapter.py
+    │   pim_record_to_product(record)
+    │   Translates 13 PIM fields → clean Product schema
+    │   Strips whitespace, picks best existing_description
+    │
+4.  tools/generate_description.py  (FastMCP tool)
+    │   Initialises DescriptionState TypedDict with product, channel, brand_voice
+    │
+5.  workflows/description_workflow.py  (LangGraph)
+    │   description_graph.ainvoke(state)
+    │   Enters "generate" node
+    │
+6.  generate_node — step A: resolve model
+    │   agent_model_registry.get("product_description_generator")
+    │   → returns "gpt-4o" (or default "claude-sonnet-4-6")
+    │
+7.  generate_node — step B: build prompts
+    │   prompts/brand_voice.py
+    │   get_system_prompt(brand_voice) → system instruction string
+    │   get_user_message(product, channel) → user turn string
+    │
+8.  generate_node — step C: call the LLM
+    │   pim_core/llm/client.py
+    │   llm_client.complete(model="gpt-4o", system=..., messages=[...])
+    │
+9.  pim_core/llm/factory.py
+    │   get_provider("gpt-4o") → OpenAIProvider (cached)
+    │
+10. pim_core/llm/providers/openai_provider.py
+    │   openai.AsyncOpenAI.chat.completions.create(...)
+    │   Async HTTP call to OpenAI API
+    │   Awaits response (event loop handles other requests meanwhile)
+    │
+11. Raw text response returns up the call stack to generate_node
+    │
+12. generate_node — step D: parse response
+    │   _extract_json(raw_text) strips markdown code fences if present
+    │   json.loads(cleaned) → {"title": ..., "description": ..., "seo_keywords": [...]}
+    │   Returns updated state fields
+    │   If parsing fails → returns {"error": "Failed to parse LLM response: ..."}
+    │
+13. LangGraph follows edge "generate" → END
+    │   ainvoke() returns final state dict
+    │
+14. tools/generate_description.py
+    │   Checks state["error"] — if set, raises ValueError
+    │   Assembles DescriptionResult from state fields
+    │   Reads model_used from registry (what model was actually used)
+    │
+15. routes/product_description_generator_api_route.py
+    │   Returns DescriptionResult
+    │   FastAPI serialises to JSON
+    │
+16. HTTP 200 response
+    {
+      "product_id": "705517",
+      "channel": "ecommerce",
+      "title": "Apple Mac Studio M4 Max — 64GB RAM, 1TB SSD",
+      "description": "Experience unparalleled desktop performance...",
+      "seo_keywords": ["mac studio", "m4 max", "desktop workstation"],
+      "word_count": 38,
+      "model_used": "gpt-4o"
+    }
+```
+
+---
+
+### Why async/await? (for data engineers)
+
+If you have written data pipelines, you are familiar with waiting — waiting for a database query, waiting for an API call, waiting for a file to upload. In traditional code, while you wait, the CPU sits idle.
+
+`async/await` in Python solves this by using a **single-threaded event loop**. Instead of blocking the entire program while waiting for the OpenAI API to respond, the event loop pauses that coroutine and runs something else — like handling the next incoming HTTP request.
+
+```python
+# This does NOT block — while OpenAI responds, FastAPI handles other requests
+raw_text = await llm_client.complete(...)
+```
+
+For an LLM service that makes network calls for every request, this is critical. Without async, a server with one worker could only handle one request at a time. With async, it can handle hundreds simultaneously because most of the time is spent waiting for network I/O, not doing CPU work.
+
+> **Real-world impact:** A single uvicorn worker with async handlers can typically serve 50–200 concurrent LLM requests before bottlenecking on CPU, versus 1 request at a time with blocking (synchronous) code.
+
+---
+
+### Why separate prompts, tools, and workflows?
+
+This is a design choice that pays off in maintenance:
+
+| Layer | Changes when... | Who changes it |
+|---|---|---|
+| `prompts/brand_voice.py` | You want different copy style, add constraints, change output format | Copywriter / prompt engineer |
+| `tools/generate_description.py` | You add a new parameter or change the return schema | Backend developer |
+| `workflows/description_workflow.py` | You add a retry step, a review node, parallel steps | Agent developer |
+| `pim_core/llm/` | You add a new provider (Mistral, Cohere) | Infrastructure |
+
+Each layer can change independently without touching the others. A prompt engineer can iterate on the system prompt without touching the LangGraph code. A developer can add a new LLM provider without touching the workflow.
+
+> **Interview answer:** "We applied separation of concerns — each file has one reason to change. The prompt builders are pure functions that can be tested in isolation. The workflow is where orchestration logic lives. The tools are the public interface. The LLM layer is the infrastructure. Changing one doesn't require changing the others."
+
+---
+
+### Key terms for interviews
+
+| Term | What it means in this project |
+|---|---|
+| **Agent** | A software system that perceives input, reasons about it (via LLM), and produces structured output |
+| **MCP (Model Context Protocol)** | Open standard for connecting LLMs to external tools and data sources |
+| **FastMCP** | Python library for building MCP-compliant tool servers |
+| **LangGraph StateGraph** | A workflow defined as a directed graph where shared state flows through nodes |
+| **Node** | A function in a LangGraph graph — receives state, does work, returns updated state |
+| **Edge** | A connection between nodes — defines which node runs next |
+| **State (TypedDict)** | The shared data dictionary that every node reads from and writes to |
+| **ainvoke** | Async invocation of a LangGraph graph — returns the final state |
+| **Strategy Pattern** | `LLMClient` calls whatever provider the factory gives it — doesn't know which one |
+| **Factory Pattern** | `get_provider()` decides which class to instantiate based on the model name |
+| **Singleton** | Module-level variables (`settings`, `llm_client`, `agent_model_registry`) — one per process |
+| **Adapter Pattern** | `pim_record_to_product()` translates one data format into another |
+| **Lazy import** | OpenAI and Google SDKs are only imported when first needed, not at startup |
+| **Registry** | `AgentModelRegistry` — the runtime map of which LLM each agent uses, backed by SQLite |
