@@ -3,18 +3,6 @@ from __future__ import annotations
 import json
 from typing import Any
 
-# Fields that are never useful for classification — internal system fields
-_SKIP_FIELDS = {
-    "productID", "id", "shortSku", "sku", "vendorStyle", "upc", "isbnEan",
-    "reclassToSKU", "reclassToProductID", "ipVendorID", "ipVendorNumber",
-    "ipStyle", "ipSize", "ipColor", "brandID", "prodManufacturerID",
-    "coordGroupID", "coordGroup", "deckID", "deck", "filler", "buyerID",
-    "buyerFirstName", "buyerLastName", "buyerIPUser", "buyerAssociateID",
-    "dateCreated", "lastModifiedOn", "firstShipDate", "firstActivityDate",
-    "streetDate", "adEmbargo", "asteaWarranty", "accountCode",
-    "isActive", "isAnItemSet", "pageCount",
-}
-
 _SYSTEM_PROMPT = """\
 You are a product category classifier for a PIM system.
 
@@ -41,21 +29,12 @@ def get_system_prompt() -> str:
 
 
 def _clean_product(product: dict[str, Any]) -> dict[str, Any]:
-    """Remove empty, zero, internal-system fields. Keep only what describes the product."""
-    cleaned = {}
-    for k, v in product.items():
-        if k in _SKIP_FIELDS:
-            continue
-        if v is None or v == "" or v == 0 or v == 0.0 or v is False:
-            continue
-        # Skip attribute fields that are empty (attribute1..attribute99)
-        if k.startswith("attribute") and k[9:].isdigit():
-            continue
-        # Skip image/copy fields with no value
-        if k.startswith(("image", "copy")) and not v:
-            continue
-        cleaned[k] = v
-    return cleaned
+    """Remove only empty/null/false values. LLM decides what's relevant."""
+    return {
+        k: v
+        for k, v in product.items()
+        if v is not None and v != "" and v != 0 and v != 0.0 and v is not False
+    }
 
 
 def get_user_message(product: dict[str, Any], taxonomy_type: str) -> str:
