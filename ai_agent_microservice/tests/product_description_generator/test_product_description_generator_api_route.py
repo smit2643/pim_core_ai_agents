@@ -30,8 +30,8 @@ MOCK_LLM_RESPONSE = json.dumps({
 
 
 @pytest.mark.asyncio
-async def test_pim_ingest_endpoint_returns_200_with_valid_record():
-    """POST /pim/generate-description with a valid PIM record returns 200 and DescriptionResult."""
+async def test_product_description_generator_endpoint_returns_200_with_valid_record():
+    """POST /agents/generate-description with a valid PIM record returns 200 and DescriptionResult."""
     with patch(
         "agents.product_description_generator.workflows.description_workflow.llm_client.complete",
         new=AsyncMock(return_value=MOCK_LLM_RESPONSE),
@@ -39,7 +39,7 @@ async def test_pim_ingest_endpoint_returns_200_with_valid_record():
         from agents.product_description_generator.main import app
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
-                "/pim/generate-description",
+                "/agents/generate-description",
                 json={"pim_record": SAMPLE_PIM_RECORD, "channel": "ecommerce"},
             )
 
@@ -54,7 +54,7 @@ async def test_pim_ingest_endpoint_returns_200_with_valid_record():
 
 
 @pytest.mark.asyncio
-async def test_pim_ingest_strips_category_trailing_spaces():
+async def test_product_description_generator_strips_category_trailing_spaces():
     """Adapter strips trailing spaces from coordGroupDescription before passing to the LLM."""
     with patch(
         "agents.product_description_generator.workflows.description_workflow.llm_client.complete",
@@ -63,7 +63,7 @@ async def test_pim_ingest_strips_category_trailing_spaces():
         from agents.product_description_generator.main import app
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
-                "/pim/generate-description",
+                "/agents/generate-description",
                 json={"pim_record": SAMPLE_PIM_RECORD, "channel": "ecommerce"},
             )
 
@@ -71,8 +71,8 @@ async def test_pim_ingest_strips_category_trailing_spaces():
 
 
 @pytest.mark.asyncio
-async def test_pim_ingest_accepts_optional_brand_voice():
-    """POST /pim/generate-description respects an explicit brand_voice payload."""
+async def test_product_description_generator_accepts_optional_brand_voice():
+    """POST /agents/generate-description respects an explicit brand_voice payload."""
     with patch(
         "agents.product_description_generator.workflows.description_workflow.llm_client.complete",
         new=AsyncMock(return_value=MOCK_LLM_RESPONSE),
@@ -80,7 +80,7 @@ async def test_pim_ingest_accepts_optional_brand_voice():
         from agents.product_description_generator.main import app
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
-                "/pim/generate-description",
+                "/agents/generate-description",
                 json={
                     "pim_record": SAMPLE_PIM_RECORD,
                     "channel": "wholesale",
@@ -99,8 +99,8 @@ async def test_pim_ingest_accepts_optional_brand_voice():
 
 
 @pytest.mark.asyncio
-async def test_pim_ingest_returns_422_when_llm_returns_invalid_json():
-    """POST /pim/generate-description returns 422 when LLM output cannot be parsed."""
+async def test_product_description_generator_returns_422_when_llm_returns_invalid_json():
+    """POST /agents/generate-description returns 422 when LLM output cannot be parsed."""
     with patch(
         "agents.product_description_generator.workflows.description_workflow.llm_client.complete",
         new=AsyncMock(return_value="NOT VALID JSON"),
@@ -108,7 +108,7 @@ async def test_pim_ingest_returns_422_when_llm_returns_invalid_json():
         from agents.product_description_generator.main import app
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
-                "/pim/generate-description",
+                "/agents/generate-description",
                 json={"pim_record": SAMPLE_PIM_RECORD, "channel": "ecommerce"},
             )
 
@@ -116,8 +116,8 @@ async def test_pim_ingest_returns_422_when_llm_returns_invalid_json():
 
 
 @pytest.mark.asyncio
-async def test_pim_ingest_uses_real_sample_data_record():
-    """End-to-end: POST /pim/generate-description with the first record from the actual sample file."""
+async def test_product_description_generator_uses_real_sample_data_record():
+    """End-to-end: POST /agents/generate-description with the first record from the actual sample file."""
     with patch(
         "agents.product_description_generator.workflows.description_workflow.llm_client.complete",
         new=AsyncMock(return_value=json.dumps({
@@ -140,7 +140,7 @@ async def test_pim_ingest_uses_real_sample_data_record():
         }
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
-                "/pim/generate-description",
+                "/agents/generate-description",
                 json={"pim_record": nas_record, "channel": "ecommerce"},
             )
 

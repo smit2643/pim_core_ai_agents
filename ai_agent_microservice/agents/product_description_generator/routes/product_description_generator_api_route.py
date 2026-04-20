@@ -10,7 +10,7 @@ from pim_core.adapters.pim_adapter import pim_record_to_product
 from pim_core.schemas.pim_product import PIMProductRecord
 from pim_core.schemas.product import BrandVoice, DescriptionResult
 
-router = APIRouter(prefix="/pim", tags=["pim-ingest"])
+router = APIRouter(prefix="/agents", tags=["agents"])
 
 
 class GenerateFromPIMRequest(BaseModel):
