@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from typing import Any
 
 import redis.asyncio as aioredis
 
@@ -22,26 +23,31 @@ def get_redis() -> aioredis.Redis:
     return _redis
 
 
-def _key(product_id: str, taxonomy_type: str) -> str:
-    raw = f"{product_id}:{taxonomy_type}"
+def _content_hash(product: dict[str, Any], taxonomy_type: str) -> str:
+    """Hash product content so identical products share the same cache entry
+    regardless of product_id — products rarely repeat but same-content products do."""
+    stable = json.dumps(product, sort_keys=True, default=str)
+    raw = f"{stable}:{taxonomy_type}"
     return "auto_classifier:" + hashlib.sha256(raw.encode()).hexdigest()
 
 
-async def get_cached(product_id: str, taxonomy_type: str) -> dict | None:
+async def get_cached(product: dict[str, Any], taxonomy_type: str) -> dict | None:
     try:
-        data = await get_redis().get(_key(product_id, taxonomy_type))
+        data = await get_redis().get(_content_hash(product, taxonomy_type))
         return json.loads(data) if data else None
     except Exception:
         return None
 
 
 async def set_cached(
-    product_id: str,
+    product: dict[str, Any],
     taxonomy_type: str,
     value: dict,
     ttl: int = settings.cache_ttl_seconds,
 ) -> None:
     try:
-        await get_redis().setex(_key(product_id, taxonomy_type), ttl, json.dumps(value))
+        await get_redis().setex(
+            _content_hash(product, taxonomy_type), ttl, json.dumps(value)
+        )
     except Exception:
         pass

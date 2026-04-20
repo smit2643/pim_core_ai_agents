@@ -1,18 +1,32 @@
 from __future__ import annotations
 
-from pim_core.schemas.product import Product
+from typing import Any
 
 _SYSTEM_PROMPT = """\
-You are a product taxonomy classifier for a PIM system.
-Given a product and a taxonomy standard, return the single best matching category code and name.
+You are a product category classifier for a PIM (Product Information Management) system.
 
-Respond ONLY with valid JSON in this exact format:
+Your job:
+1. Understand what the product is from whatever data is provided
+2. Assign the most accurate category based on the taxonomy standard requested
+
+Rules:
+- Analyse ALL provided product fields to understand what the product is
+- Ignore empty, null, or irrelevant fields
+- Return ONLY valid JSON — no extra text
+
+Response format:
 {"code": "<category_code>", "name": "<category_name>", "confidence": <0.0-1.0>, "reasoning": "<brief reason>"}
 
-If no suitable category exists, respond:
-{"code": null, "name": null, "confidence": 0.0, "reasoning": "<why no match>"}
+Taxonomy behaviour:
+- GS1: Return the official GS1 Global Product Classification code and full category name
+- eCl@ss: Return the official eCl@ss code and category name
+- custom: Return code as null — return a clear, logical category name based on what the product is
 
-Do not include any text outside the JSON object.\
+Confidence guide:
+- 0.90-1.0: Product is clearly identifiable, category is obvious
+- 0.70-0.89: Good match but some ambiguity in product data
+- 0.50-0.69: Limited product data, best guess
+- Below 0.50: Very unclear product, low confidence\
 """
 
 
@@ -20,46 +34,24 @@ def get_system_prompt() -> str:
     return _SYSTEM_PROMPT
 
 
-def get_user_message(
-    product: Product,
-    taxonomy_type: str,
-    candidates: list[dict] | None = None,
-) -> str:
-    attrs = product.attributes
-    attr_lines = "\n".join(
-        f"  {k}: {v}"
-        for k, v in {
-            "Color": attrs.color,
-            "Size": attrs.size,
-            "Material": attrs.material,
-            "Weight": attrs.weight,
-            "Dimensions": attrs.dimensions,
-            "Brand": attrs.brand,
-            **attrs.additional,
-        }.items()
-        if v
+def get_user_message(product: dict[str, Any], taxonomy_type: str) -> str:
+    # Extract all non-empty fields from whatever the client sends
+    filled = {
+        k: v
+        for k, v in product.items()
+        if v is not None and v != "" and v != 0 and v is not False
+    }
+
+    product_lines = "\n".join(f"  {k}: {v}" for k, v in filled.items())
+
+    taxonomy_instruction = {
+        "gs1": "Classify into the GS1 Global Product Classification standard. Return the GS1 segment/family/class/brick code and name.",
+        "eclass": "Classify into the eCl@ss standard. Return the eCl@ss code and name.",
+        "custom": "Classify into a logical category based on what this product is. Return code as null and a clear descriptive category name.",
+    }.get(taxonomy_type, f"Classify into the {taxonomy_type.upper()} taxonomy standard.")
+
+    return (
+        f"Product data:\n{product_lines}\n\n"
+        f"Taxonomy: {taxonomy_type.upper()}\n"
+        f"{taxonomy_instruction}"
     )
-
-    msg = (
-        f"Product:\n"
-        f"  ID: {product.id}\n"
-        f"  SKU: {product.sku}\n"
-        f"  Name: {product.name}\n"
-        f"  Category hint: {product.category}\n"
-        + (f"  Attributes:\n{attr_lines}\n" if attr_lines else "")
-        + (f"  Description: {product.existing_description}\n" if product.existing_description else "")
-        + f"\nTaxonomy standard: {taxonomy_type.upper()}\n"
-    )
-
-    if candidates:
-        candidate_lines = "\n".join(
-            f"  {i+1}. [{c['code']}] {c['name']} (similarity: {c['score']:.3f})"
-            + (f" — {c['breadcrumb']}" if c.get("breadcrumb") else "")
-            for i, c in enumerate(candidates[:5])
-        )
-        msg += f"\nTop candidate categories from taxonomy search:\n{candidate_lines}\n"
-        msg += f"\nSelect the best match from the candidates above, or choose a different category if none fit."
-    else:
-        msg += f"\nClassify this product into the most appropriate {taxonomy_type.upper()} category."
-
-    return msg
