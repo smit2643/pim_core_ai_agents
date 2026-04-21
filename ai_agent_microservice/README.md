@@ -20,6 +20,7 @@ A production-ready FastAPI microservice that powers AI agents for a Product Info
 12. [Knowledge Graph (graphify)](#12-knowledge-graph-graphify)
 13. [Shared vs Agent-Specific Code](#13-shared-vs-agent-specific-code)
 14. [Deep Dive — LangGraph, FastMCP, and How Everything Works Together](#14-deep-dive--langgraph-fastmcp-and-how-everything-works-together)
+15. [Deep Dive — The LLM Provider Layer (base, providers, client, factory, registry)](#15-deep-dive--the-llm-provider-layer-pim_corellm)
 
 ---
 
@@ -1498,3 +1499,896 @@ Each layer can change independently without touching the others. A prompt engine
 | **Adapter Pattern** | `pim_record_to_product()` translates one data format into another |
 | **Lazy import** | OpenAI and Google SDKs are only imported when first needed, not at startup |
 | **Registry** | `AgentModelRegistry` — the runtime map of which LLM each agent uses, backed by SQLite |
+
+---
+
+## 15. Deep Dive — The LLM Provider Layer (`pim_core/llm/`)
+
+> This section answers every question about how `base.py`, the three providers, `client.py`, `factory.py`, and `registry.py` work together. Read this section alongside the actual source files.
+
+---
+
+### Q1 — How do all these files work together?
+
+Think of it as a chain of responsibility. Each file has one job, and they hand off to each other:
+
+```
+                         ┌──────────────────────────────────────────────────────┐
+                         │  generate_node  (workflows/description_workflow.py)  │
+                         │  "I need to call the LLM. Which model should I use?" │
+                         └────────────────────────┬─────────────────────────────┘
+                                                  │ calls
+                                                  ▼
+                         ┌──────────────────────────────────────────────────────┐
+                         │  agent_model_registry.get("product_description_      │
+                         │  generator")   →   "gpt-4o"       (registry.py)      │
+                         └────────────────────────┬─────────────────────────────┘
+                                                  │ model name resolved
+                                                  ▼
+                         ┌──────────────────────────────────────────────────────┐
+                         │  llm_client.complete(model="gpt-4o", ...)  (client.py)│
+                         │  "I don't know about providers. I'll ask the factory."│
+                         └────────────────────────┬─────────────────────────────┘
+                                                  │ calls
+                                                  ▼
+                         ┌──────────────────────────────────────────────────────┐
+                         │  get_provider("gpt-4o")           (factory.py)       │
+                         │  "gpt-4o is in _OPENAI_MODELS → return OpenAIProvider"│
+                         └────────────────────────┬─────────────────────────────┘
+                                                  │ returns
+                                                  ▼
+                         ┌──────────────────────────────────────────────────────┐
+                         │  OpenAIProvider.complete(...)  (openai_provider.py)  │
+                         │  Extends BaseLLMProvider  (base.py)                  │
+                         │  Makes real HTTP call to OpenAI API                  │
+                         └────────────────────────┬─────────────────────────────┘
+                                                  │ returns
+                                                  ▼
+                                          raw text string
+```
+
+**File responsibilities at a glance:**
+
+| File | Single responsibility |
+|---|---|
+| `base.py` | Defines the contract — what every provider MUST implement |
+| `anthropic_provider.py` | Implements that contract using the Anthropic SDK |
+| `openai_provider.py` | Implements that contract using the OpenAI SDK |
+| `google_provider.py` | Implements that contract using the Google Gemini SDK |
+| `factory.py` | Decides which provider class to use based on the model name |
+| `client.py` | The only file the rest of the codebase ever talks to |
+| `registry.py` | Stores which model each agent is currently assigned to |
+
+---
+
+### Q2 — What is `BaseLLMProvider`? What is `ABC`? What is `abstractmethod`? What does `complete()` do?
+
+**File:** [pim_core/llm/providers/base.py](pim_core/llm/providers/base.py)
+
+```python
+from abc import ABC, abstractmethod
+
+class BaseLLMProvider(ABC):
+    """Abstract base class for all LLM provider implementations."""
+
+    @abstractmethod
+    async def complete(
+        self,
+        model: str,
+        system: str,
+        messages: list[dict],
+        max_tokens: int = 1024,
+    ) -> str:
+        """Call the LLM and return the response text."""
+```
+
+**What is `ABC` (Abstract Base Class)?**
+
+`ABC` is a Python class from the `abc` module. When you inherit from it, Python treats your class as an *abstract* class — a class that defines a blueprint but cannot be used directly.
+
+Think of `ABC` like a job description. It says "any provider we hire must be able to do these things". But the job description itself is not a worker — you can't call it directly.
+
+```python
+# This would raise: TypeError: Can't instantiate abstract class BaseLLMProvider
+# with abstract method complete
+provider = BaseLLMProvider()   # NOT allowed
+
+# This is allowed — concrete subclass with complete() implemented
+provider = AnthropicProvider() # OK — it implements complete()
+```
+
+**What is `@abstractmethod`?**
+
+`@abstractmethod` is a decorator that marks a method as "must be overridden by every subclass". If you forget to implement it, Python raises a `TypeError` at instantiation time — not at the call site. This is a compile-time safety net.
+
+```python
+class BadProvider(BaseLLMProvider):
+    pass  # forgot to implement complete()
+
+bad = BadProvider()
+# TypeError: Can't instantiate abstract class BadProvider with abstract method complete
+```
+
+**What does `complete()` do?**
+
+`complete()` is the single method that every provider must implement. It is the *contract*. The signature defines:
+
+| Parameter | Type | What it carries |
+|---|---|---|
+| `model` | `str` | Which exact model to use — e.g. `"gpt-4o"`, `"claude-sonnet-4-6"` |
+| `system` | `str` | The system prompt — instructions to the LLM about its role, output format, constraints |
+| `messages` | `list[dict]` | The conversation turns — `[{"role": "user", "content": "..."}]` |
+| `max_tokens` | `int` | Hard cap on response length (defaults to 1024) |
+| **returns** | `str` | The raw text the LLM produced |
+
+Every provider maps these four universal parameters to whatever format its own SDK expects. The callers never need to know these differences exist.
+
+**Why does this pattern matter for interviews?**
+
+This is the **Open/Closed Principle** from SOLID:
+- *Open* for extension — you can add `MistralProvider` without touching any existing code
+- *Closed* for modification — adding a new provider never breaks existing callers
+
+---
+
+### Q3 — `OpenAIProvider` deep dive
+
+**File:** [pim_core/llm/providers/openai_provider.py](pim_core/llm/providers/openai_provider.py)
+
+#### `self._client = AsyncOpenAI(api_key=settings.openai_api_key)`
+
+```python
+from openai import AsyncOpenAI
+self._client = AsyncOpenAI(api_key=settings.openai_api_key)
+```
+
+`AsyncOpenAI` is the async version of the OpenAI Python SDK client. Under the hood it creates:
+- An HTTP session (using `httpx` internally)
+- Authentication headers with your API key
+- Connection pooling (reuses TCP connections instead of creating new ones per request)
+
+By storing it as `self._client`, the connection pool is created **once** when the provider is first initialised (which happens when the factory first creates the provider instance) and reused for every subsequent call. This is why the factory caches provider instances — so we don't create a new connection pool per request.
+
+#### `all_messages = [{"role": "system", "content": system}] + messages`
+
+```python
+all_messages = [{"role": "system", "content": system}] + messages
+```
+
+OpenAI's Chat Completions API requires all instructions, including the system prompt, to be in a single flat `messages` list in this format:
+
+```json
+[
+  {"role": "system",    "content": "You are a product copywriter..."},
+  {"role": "user",      "content": "Generate a description for: MacBook Pro..."},
+  {"role": "assistant", "content": "Here is the description: ..."},
+  {"role": "user",      "content": "Make it shorter."}
+]
+```
+
+`system` is the string returned by `get_system_prompt(brand_voice)` in [prompts/brand_voice.py](agents/product_description_generator/prompts/brand_voice.py). It is built dynamically from the `BrandVoice` configuration — tone, keywords to include, words to avoid, locale, length limits.
+
+The `+` operator on two Python lists concatenates them:
+```python
+[{"role": "system", "content": system}] + messages
+# result: [system_message, user_message_1, user_message_2, ...]
+```
+
+So `all_messages` is a new list with the system message prepended to whatever `messages` the caller passed in.
+
+#### `response = await self._client.chat.completions.create(...)`
+
+```python
+response = await self._client.chat.completions.create(
+    model=model,
+    messages=all_messages,
+    max_tokens=max_tokens,
+)
+```
+
+Breaking this down:
+
+| Part | What it is |
+|---|---|
+| `await` | This is an async call — the event loop is released while waiting for OpenAI's server to respond. Other requests can be handled meanwhile. |
+| `self._client` | The `AsyncOpenAI` instance created in `__init__` |
+| `.chat` | Accesses the "chat" section of the OpenAI API (as opposed to embeddings, images, etc.) |
+| `.completions` | Accesses the "completions" endpoint within chat |
+| `.create(...)` | Sends the HTTP POST request to `https://api.openai.com/v1/chat/completions` |
+| `model=model` | Which exact GPT model to use — e.g. `"gpt-4o"` |
+| `messages=all_messages` | The full conversation history including system message |
+| `max_tokens=max_tokens` | Maximum length of the response in tokens |
+
+The `await` is critical. Without it you'd get a coroutine object, not the actual response. With it, Python suspends this coroutine, lets the event loop work on other things, and resumes here when OpenAI replies.
+
+#### `response.choices[0].message.content`
+
+```python
+return response.choices[0].message.content
+```
+
+OpenAI returns a response object structured like this (simplified):
+
+```python
+ChatCompletion(
+    choices=[
+        Choice(
+            index=0,
+            message=ChatCompletionMessage(
+                role="assistant",
+                content='{"title": "...", "description": "...", "seo_keywords": [...]}'
+            ),
+            finish_reason="stop"
+        )
+        # OpenAI can return multiple choices if n > 1 (we don't set n, so always 1)
+    ],
+    model="gpt-4o",
+    usage=CompletionUsage(prompt_tokens=..., completion_tokens=..., total_tokens=...)
+)
+```
+
+- `response.choices` — a list of completions (we always get exactly one since we don't set `n`)
+- `[0]` — take the first (and only) choice
+- `.message` — the assistant's message object
+- `.content` — the text string the model wrote
+
+The result is the raw text string — e.g. the JSON that the LLM produced. It goes back up to `generate_node` which then runs `json.loads()` on it.
+
+---
+
+### Q4 — `GoogleProvider` deep dive
+
+**File:** [pim_core/llm/providers/google_provider.py](pim_core/llm/providers/google_provider.py)
+
+#### Message format conversion
+
+```python
+gemini_messages = [
+    {
+        "role": "user" if m["role"] == "user" else "model",
+        "parts": [m["content"]],
+    }
+    for m in messages
+]
+```
+
+This is a **list comprehension** — a compact for-loop that builds a new list by transforming each element. The long-form equivalent is:
+
+```python
+gemini_messages = []
+for m in messages:
+    if m["role"] == "user":
+        role = "user"
+    else:
+        role = "model"          # Gemini uses "model", not "assistant"
+    gemini_messages.append({
+        "role": role,
+        "parts": [m["content"]] # Gemini uses "parts" (list), not "content" (string)
+    })
+```
+
+**Why the conversion is necessary:**
+
+Different LLM providers use different conventions for the same concept:
+
+| Convention | OpenAI | Anthropic | Google Gemini |
+|---|---|---|---|
+| AI role name | `"assistant"` | `"assistant"` | `"model"` |
+| Message body key | `"content"` (string) | `"content"` (string) | `"parts"` (list) |
+| System prompt | First message with `"system"` role | Separate `system=` parameter | `system_instruction=` on the model |
+
+Our shared format uses `{"role": "user" | "assistant", "content": "..."}`. The GoogleProvider translates this into Gemini's format before making the API call.
+
+**Note:** The system prompt is handled separately — it is passed to `GenerativeModel(system_instruction=system)` when creating the client, not injected into the messages list like OpenAI does.
+
+#### `generate_content_async`
+
+```python
+response = await client.generate_content_async(
+    gemini_messages,
+    generation_config=self._genai.GenerationConfig(
+        max_output_tokens=max_tokens,
+    ),
+)
+```
+
+| Part | What it is |
+|---|---|
+| `await` | Async call — event loop released while Gemini's API responds |
+| `client` | A `GenerativeModel` instance for the specific Gemini model requested |
+| `.generate_content_async(...)` | Gemini's equivalent of OpenAI's `chat.completions.create()` |
+| `gemini_messages` | The converted message list |
+| `generation_config=GenerationConfig(...)` | Gemini's way of passing generation parameters |
+| `max_output_tokens=max_tokens` | Gemini uses `max_output_tokens`, OpenAI uses `max_tokens` — different SDK, different name |
+
+`response.text` at the end is Gemini's equivalent of `response.choices[0].message.content` — it returns the generated text directly.
+
+---
+
+### Q5 — `AnthropicProvider` deep dive
+
+**File:** [pim_core/llm/providers/anthropic_provider.py](pim_core/llm/providers/anthropic_provider.py)
+
+```python
+response = await self._client.messages.create(
+    model=model,
+    max_tokens=max_tokens,
+    system=system,
+    messages=messages,
+)
+```
+
+Anthropic's SDK is the cleanest of the three because its API design separates the system prompt from the conversation messages as a dedicated `system=` parameter — instead of requiring you to prepend it to the messages list like OpenAI does.
+
+| Parameter | What it carries |
+|---|---|
+| `model` | e.g. `"claude-sonnet-4-6"` |
+| `max_tokens` | Hard cap on response length |
+| `system` | The system prompt — passed as a separate parameter, not in `messages` |
+| `messages` | Just the conversation turns — `[{"role": "user", "content": "..."}]` |
+
+The response structure:
+
+```python
+# Anthropic returns:
+Message(
+    content=[
+        ContentBlock(type="text", text='{"title": "...", "description": "..."}')
+    ],
+    model="claude-sonnet-4-6",
+    usage=Usage(input_tokens=..., output_tokens=...)
+)
+
+# We extract:
+response.content[0].text   # the text string
+```
+
+Unlike OpenAI's `response.choices[0].message.content`, Anthropic uses `response.content[0].text`. Different names, same idea — the generated text string.
+
+**Side-by-side comparison of all three providers:**
+
+```python
+# OpenAI
+all_messages = [{"role": "system", "content": system}] + messages
+response = await client.chat.completions.create(model=model, messages=all_messages, max_tokens=max_tokens)
+return response.choices[0].message.content
+
+# Google
+client = GenerativeModel(model_name=model, system_instruction=system)
+gemini_msgs = [{"role": ..., "parts": [m["content"]]} for m in messages]
+response = await client.generate_content_async(gemini_msgs, generation_config=GenerationConfig(max_output_tokens=max_tokens))
+return response.text
+
+# Anthropic
+response = await client.messages.create(model=model, max_tokens=max_tokens, system=system, messages=messages)
+return response.content[0].text
+```
+
+All three do the same thing. The providers are what hide these differences from the rest of the codebase.
+
+---
+
+### Q6 — `LLMClient` deep dive
+
+**File:** [pim_core/llm/client.py](pim_core/llm/client.py)
+
+```python
+class LLMClient:
+    async def complete(
+        self,
+        system: str,
+        messages: list[dict],
+        model: str | None = None,
+        max_tokens: int = 1024,
+    ) -> str:
+        from pim_core.config import settings
+        model_name = model or settings.claude_model
+        provider = get_provider(model_name)
+        return await provider.complete(
+            model=model_name,
+            system=system,
+            messages=messages,
+            max_tokens=max_tokens,
+        )
+
+llm_client = LLMClient()  # module-level singleton
+```
+
+**What is `LLMClient`?**
+
+`LLMClient` is the **single public interface** for making LLM calls anywhere in the codebase. No agent, workflow, or tool should ever import a provider directly. Every LLM call goes through `llm_client.complete()`.
+
+Think of it like a database connection pool — the rest of your application doesn't care if the database is Postgres or MySQL; it just calls `db.execute(...)`. `LLMClient` is that unified interface for LLM calls.
+
+**Why is `complete` async?**
+
+Because every provider's `complete()` is async (they all make network calls). To call an async function you must either `await` it (inside another async function) or run it in an event loop. `LLMClient.complete()` is declared `async` so callers can `await llm_client.complete(...)`.
+
+**How does it tie to `base.py`?**
+
+```
+LLMClient.complete()
+    │
+    │  calls get_provider(model_name)
+    │  factory returns a BaseLLMProvider subclass instance
+    │          │
+    │          │  e.g. OpenAIProvider (which inherits BaseLLMProvider)
+    │
+    ▼
+provider.complete(model, system, messages, max_tokens)
+    │
+    │  This works regardless of which concrete class provider is
+    │  because all subclasses implement complete() with the same signature
+    │  — guaranteed by @abstractmethod in base.py
+    │
+    ▼
+returns: str (the LLM response text)
+```
+
+`provider.complete(...)` works here because Python's polymorphism guarantees that whatever object `get_provider()` returns, it will have a `complete()` method with this exact signature. The `@abstractmethod` decorator in `base.py` enforces this guarantee at class construction time.
+
+**Why call `provider.complete(...)` instead of calling the SDK directly?**
+
+Because `LLMClient` doesn't know (and shouldn't know) which provider it has. It just calls the contract method. This is the **Strategy Pattern**:
+
+```
+Without the pattern:                    With the pattern:
+┌─────────────────────────────┐         ┌────────────────────────┐
+│ if model.startswith("gpt"): │         │ provider = get_provider│
+│   openai_call(...)          │         │ provider.complete(...)  │
+│ elif model.startswith("cl"  │         └────────────────────────┘
+│   anthropic_call(...)       │
+│ elif model.startswith("gem" │         Adding Mistral:
+│   gemini_call(...)          │         • Add MistralProvider file
+│ elif model.startswith("mis" │         • Add to factory
+│   mistral_call(...)         │         • Nothing else changes
+└─────────────────────────────┘
+                                         vs.
+Adding Mistral:                         
+• Add new elif branch everywhere        
+  this if-block appears                 
+```
+
+---
+
+### Q7 — `factory.py` deep dive
+
+**File:** [pim_core/llm/factory.py](pim_core/llm/factory.py)
+
+#### `_instances: dict[str, BaseLLMProvider] = {}`
+
+```python
+_instances: dict[str, BaseLLMProvider] = {}
+```
+
+This is a **module-level dictionary** that caches provider instances. The keys are provider names (`"anthropic"`, `"openai"`, `"google"`), the values are the actual provider objects.
+
+**Why is this necessary?**
+
+Provider `__init__` methods do expensive work:
+- Check API keys
+- Import SDK packages (which themselves do initialization)
+- Create HTTP clients and connection pools
+
+If we created a new provider on every LLM call, we would pay this cost thousands of times. With the cache, we pay it once — the first time that provider is used — and reuse the same instance forever.
+
+```python
+def get_provider(model_name: str) -> BaseLLMProvider:
+    if model_name in _ANTHROPIC_MODELS:
+        key = "anthropic"
+        if key not in _instances:             # ← only create once
+            from pim_core.llm.providers.anthropic_provider import AnthropicProvider
+            _instances[key] = AnthropicProvider()
+        return _instances[key]                # ← always return the cached one
+```
+
+This is the **Singleton Pattern** applied per-provider. After the first request for any Anthropic model, `_instances["anthropic"]` exists and is reused forever.
+
+#### `frozenset` and `_ANTHROPIC_MODELS`
+
+```python
+_ANTHROPIC_MODELS: frozenset[str] = frozenset(m.value for m in AllAvailableModelsAnthropic)
+```
+
+Breaking this down piece by piece:
+
+**`m.value for m in AllAvailableModelsAnthropic`** — this is a generator expression that extracts the string values from the enum:
+
+```python
+# AllAvailableModelsAnthropic is an Enum defined like:
+class AllAvailableModelsAnthropic(str, Enum):
+    CLAUDE_OPUS = "claude-opus-4-6"
+    CLAUDE_SONNET = "claude-sonnet-4-6"
+    CLAUDE_HAIKU = "claude-haiku-4-5-20251001"
+
+# m.value for m in AllAvailableModelsAnthropic yields:
+# "claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5-20251001"
+```
+
+**`frozenset(...)`** — wraps those strings in a frozen (immutable) set.
+
+Why `frozenset` specifically?
+
+| Property | Why it matters here |
+|---|---|
+| **Set** (not list) | `in` check is O(1) — instant lookup regardless of size. A list `in` check is O(n). |
+| **Frozen** (immutable) | The valid model names should never change at runtime. `frozenset` enforces this — you cannot add/remove elements accidentally. |
+| **Immutable** | Can be used as a dictionary key or stored in other sets safely. |
+
+```python
+# O(1) lookup — works the same with 3 models or 300 models
+if model_name in _ANTHROPIC_MODELS:   # instant
+    ...
+```
+
+#### `all_models = sorted(_ANTHROPIC_MODELS | _OPENAI_MODELS | _GOOGLE_MODELS)`
+
+```python
+all_models = sorted(_ANTHROPIC_MODELS | _OPENAI_MODELS | _GOOGLE_MODELS)
+```
+
+The `|` operator between two sets returns their **union** — a new set containing all elements from both, with no duplicates:
+
+```python
+{"a", "b"} | {"b", "c"} | {"d"}  →  {"a", "b", "c", "d"}
+```
+
+`sorted(...)` converts the set to a sorted list (sets have no ordering) so the error message lists models in alphabetical order — helpful for reading:
+
+```
+ValueError: No provider found for model 'unknown-xyz'.
+Supported models: claude-haiku-4-5-20251001, claude-opus-4-6, claude-sonnet-4-6,
+gemini-1.5-flash, gemini-1.5-pro, gemini-2.0-flash, gpt-4-turbo, gpt-4o, ...
+```
+
+#### Why does `_ANTHROPIC_MODELS` start with `_`?
+
+The leading underscore is a **Python convention** for "this is module-private". It is not enforced by the language (unlike Java's `private` keyword), but it signals to other developers:
+
+> "Do not import `_ANTHROPIC_MODELS` from outside this module. It's an implementation detail. Use `get_provider()` instead."
+
+Linters and IDEs respect this convention and will warn you if you import a name starting with `_` from outside its module.
+
+---
+
+### Q8 — `AgentModelRegistry` deep dive
+
+**File:** [pim_core/llm/registry.py](pim_core/llm/registry.py)
+
+#### What is a registry in general?
+
+A **registry** is a central lookup table that maps names to things. Real-world registries you already know:
+
+| Real-world registry | Maps | To |
+|---|---|---|
+| DNS registry | Domain name (`google.com`) | IP address (`142.250.80.46`) |
+| Docker image registry | Image name (`nginx:latest`) | Image binary |
+| Windows Registry | Software name | Configuration values |
+| Service registry (Consul, etcd) | Service name (`user-service`) | IP:port of running instance |
+
+In Python, a registry is typically just a dictionary wrapped in a class with lookup and mutation methods.
+
+#### What is `AgentModelRegistry`?
+
+```python
+class AgentModelRegistry:
+    def __init__(self) -> None:
+        self._registry: dict[str, str] = agent_model_db.load_all()
+
+    def set(self, agent_name: str, model_name: str) -> None:
+        self._registry[agent_name] = model_name
+        agent_model_db.upsert(agent_name, model_name)   # write to SQLite
+
+    def get(self, agent_name: str) -> str:
+        if agent_name in self._registry:
+            return self._registry[agent_name]            # explicit assignment
+        from pim_core.config import settings
+        return settings.claude_model                     # fallback to default
+
+    def all(self) -> dict[str, str]:
+        return dict(self._registry)                      # snapshot copy
+
+    def remove(self, agent_name: str) -> None:
+        self._registry.pop(agent_name, None)
+        agent_model_db.delete(agent_name)                # remove from SQLite
+
+agent_model_registry = AgentModelRegistry()   # module-level singleton
+```
+
+`AgentModelRegistry` maps **agent names** to **model names** at runtime:
+
+```
+"product_description_generator"  →  "gpt-4o"
+"catalog"                        →  "gemini-2.0-flash"
+"procurement"                    →  (not set → falls back to "claude-sonnet-4-6")
+```
+
+**Two layers of storage:**
+
+```
+┌──────────────────────────────────────────────────┐
+│  In-memory dict: self._registry                  │
+│  { "product_description_generator": "gpt-4o" }   │  ← fast O(1) lookups per request
+└──────────────────────────────┬───────────────────┘
+                               │ written to on every set() / remove()
+                               ▼
+┌──────────────────────────────────────────────────┐
+│  SQLite database: agent_models.db                │  ← survives server restarts
+│  Table: agent_models                             │
+│  ┌────────────────────────────┬──────────────┐   │
+│  │ agent_name                 │ model_name   │   │
+│  ├────────────────────────────┼──────────────┤   │
+│  │ product_description_genera │ gpt-4o       │   │
+│  │ catalog                    │ gemini-2.0-f │   │
+│  └────────────────────────────┴──────────────┘   │
+└──────────────────────────────────────────────────┘
+```
+
+On startup, `__init__` calls `agent_model_db.load_all()` which reads SQLite and pre-populates `self._registry`. After that every `get()` is purely in-memory — no database query on the hot path.
+
+**The fallback chain for `get()`:**
+
+```
+agent_model_registry.get("product_description_generator")
+  │
+  ├── Is "product_description_generator" in self._registry?
+  │     YES → return "gpt-4o"
+  │     NO  → return settings.claude_model  (e.g. "claude-sonnet-4-6")
+```
+
+This means every agent works out of the box with Claude as the default, and any agent can be upgraded to GPT or Gemini without touching code.
+
+---
+
+### Q9 — How does this design make the code modular? (with diagrams)
+
+#### Adding a new provider (Mistral, Cohere, etc.)
+
+You only touch **two files**. Everything else stays the same.
+
+**Step 1 — Add the model names to the enum** ([pim_core/utils/all_available_models.py](pim_core/utils/all_available_models.py)):
+
+```python
+class AllAvailableModelsMistral(str, Enum):
+    MISTRAL_LARGE = "mistral-large-latest"
+    MISTRAL_SMALL = "mistral-small-latest"
+```
+
+**Step 2 — Create the provider** (new file: `pim_core/llm/providers/mistral_provider.py`):
+
+```python
+from pim_core.llm.providers.base import BaseLLMProvider
+
+class MistralProvider(BaseLLMProvider):
+    def __init__(self) -> None:
+        try:
+            from mistralai import Mistral
+        except ImportError as exc:
+            raise ImportError("pip install mistralai") from exc
+        from pim_core.config import settings
+        self._client = Mistral(api_key=settings.mistral_api_key)
+
+    async def complete(self, model: str, system: str, messages: list[dict], max_tokens: int = 1024) -> str:
+        # Mistral uses the same OpenAI-compatible format
+        all_messages = [{"role": "system", "content": system}] + messages
+        response = await self._client.chat.complete_async(
+            model=model,
+            messages=all_messages,
+            max_tokens=max_tokens,
+        )
+        return response.choices[0].message.content
+```
+
+**Step 3 — Register in the factory** ([pim_core/llm/factory.py](pim_core/llm/factory.py), add ~6 lines):
+
+```python
+from pim_core.utils.all_available_models import AllAvailableModelsMistral
+_MISTRAL_MODELS: frozenset[str] = frozenset(m.value for m in AllAvailableModelsMistral)
+
+def get_provider(model_name: str) -> BaseLLMProvider:
+    # ... existing anthropic, openai, google blocks ...
+
+    if model_name in _MISTRAL_MODELS:        # ← add this block
+        key = "mistral"
+        if key not in _instances:
+            from pim_core.llm.providers.mistral_provider import MistralProvider
+            _instances[key] = MistralProvider()
+        return _instances[key]
+```
+
+Nothing else changes. The `LLMClient`, the registry, the workflow, the routes — all untouched. Any agent can now be assigned a Mistral model via `POST /agents-settings/{name}/model`.
+
+```
+Before adding Mistral:        After adding Mistral:
+                              
+LLMClient                     LLMClient
+    │                             │
+    ▼                             ▼
+factory.py                    factory.py
+    │                             │
+    ├── AnthropicProvider          ├── AnthropicProvider
+    ├── OpenAIProvider             ├── OpenAIProvider
+    └── GoogleProvider             ├── GoogleProvider
+                                  └── MistralProvider  ← new, nothing else touched
+```
+
+---
+
+#### Swapping providers at runtime (without restart)
+
+This is the core feature. Here is the full flow when an operator calls the API:
+
+```
+Operator                  FastAPI                  Registry           Next generate call
+   │                         │                        │                      │
+   │  POST /agents-settings  │                        │                      │
+   │  /product_description_  │                        │                      │
+   │  generator/model        │                        │                      │
+   │  {"model": "gpt-4o"}    │                        │                      │
+   │────────────────────────►│                        │                      │
+   │                         │                        │                      │
+   │                         │  validate "gpt-4o"     │                      │
+   │                         │  in _OPENAI_MODELS ✓   │                      │
+   │                         │                        │                      │
+   │                         │  registry.set(         │                      │
+   │                         │   "product_desc...",   │                      │
+   │                         │   "gpt-4o")            │                      │
+   │                         │───────────────────────►│                      │
+   │                         │                        │                      │
+   │                         │                        │ _registry["product_  │
+   │                         │                        │ desc..."] = "gpt-4o" │
+   │                         │                        │                      │
+   │                         │                        │ SQLite.upsert(...)   │
+   │                         │                        │                      │
+   │◄────────────────────────│                        │                      │
+   │  200 OK                 │                        │                      │
+   │  {"agent": "product_    │                        │                      │
+   │   description_gen...",  │                        │                      │
+   │   "model": "gpt-4o"}    │                        │                      │
+   │                         │                        │                      │
+   │                         │                        │  registry.get(       │
+   │                         │                        │  "product_desc...")  │
+   │                         │                        │◄─────────────────────│
+   │                         │                        │                      │
+   │                         │                        │ returns "gpt-4o"     │
+   │                         │                        │─────────────────────►│
+   │                         │                        │                      │
+   │                         │                        │  factory.get_provider│
+   │                         │                        │  ("gpt-4o")          │
+   │                         │                        │  → OpenAIProvider    │
+   │                         │                        │                      │
+   │                         │                        │  OpenAI API called   │
+```
+
+**Key insight:** The registry is read on every LLM call (step 6 in `generate_node`). There is no caching of the model name inside the workflow. So the next call after `registry.set(...)` uses the new model immediately.
+
+---
+
+#### Writing tests with a mock provider
+
+Because `BaseLLMProvider` defines the contract, you can write a `MockProvider` in tests that:
+- Extends `BaseLLMProvider`
+- Implements `complete()` to return a hardcoded string
+- Never makes any real network calls
+
+```python
+# In a test file:
+from pim_core.llm.providers.base import BaseLLMProvider
+
+class MockProvider(BaseLLMProvider):
+    def __init__(self, response_text: str):
+        self._response = response_text
+
+    async def complete(self, model, system, messages, max_tokens=1024) -> str:
+        return self._response  # always returns this, no API call
+```
+
+**Using it in a test:**
+
+```python
+from unittest.mock import patch
+
+FAKE_LLM_RESPONSE = '{"title": "Test Title", "description": "Test desc", "seo_keywords": []}'
+
+with patch(
+    "agents.product_description_generator.workflows.description_workflow.llm_client.complete",
+    new=AsyncMock(return_value=FAKE_LLM_RESPONSE),
+):
+    result = await generate_description(product=..., channel="ecommerce")
+    assert result.title == "Test Title"
+```
+
+**Why this works:**
+
+```
+Normal execution:                 Test execution:
+                                  
+llm_client.complete(...)          llm_client.complete(...)  ← patched
+    │                                 │
+    ▼                                 ▼
+get_provider(model_name)          AsyncMock()  ← returns FAKE_LLM_RESPONSE
+    │                                 │
+    ▼                                 ▼
+AnthropicProvider.complete()      FAKE_LLM_RESPONSE string
+    │                                 │
+    ▼                                 ▼
+Real HTTP call to Claude          No network call — instant, deterministic
+```
+
+The patch replaces `llm_client.complete` at the exact import location where the workflow uses it. Everything above the patch (route handler, adapter, tool) and below the patch (JSON parsing, DescriptionResult assembly) runs for real — only the actual LLM call is faked.
+
+---
+
+### The full modularity map
+
+```
+                    ┌─────────────────────────────────────┐
+                    │         base.py                     │
+                    │   BaseLLMProvider (ABC)              │
+                    │   + complete() [abstract]            │
+                    └────┬──────────┬────────────┬────────┘
+                         │          │            │
+              implements │          │            │ implements
+                         │          │            │
+               ┌─────────┴──┐  ┌───┴──────┐ ┌──┴──────────┐
+               │ Anthropic  │  │  OpenAI  │ │   Google    │
+               │ Provider   │  │ Provider │ │  Provider   │
+               └─────────┬──┘  └───┬──────┘ └──┬──────────┘
+                         │         │            │
+                         └────┬────┘────────────┘
+                              │
+                      instantiates
+                              │
+               ┌──────────────▼──────────────────┐
+               │         factory.py               │
+               │   get_provider(model_name)        │
+               │   _instances = {}  (cache)        │
+               │   _ANTHROPIC_MODELS (frozenset)   │
+               │   _OPENAI_MODELS    (frozenset)   │
+               │   _GOOGLE_MODELS    (frozenset)   │
+               └──────────────┬──────────────────┘
+                              │
+                         used by
+                              │
+               ┌──────────────▼──────────────────┐
+               │         client.py               │
+               │   LLMClient.complete()           │
+               │   llm_client (singleton)         │
+               └──────────────┬──────────────────┘
+                              │
+                         used by
+                              │
+               ┌──────────────▼──────────────────┐
+               │     description_workflow.py      │
+               │   generate_node()               │
+               │   reads model from registry →   │
+               │   calls llm_client.complete()    │
+               └──────────────────────────────────┘
+                              │
+                     model resolved by
+                              │
+               ┌──────────────▼──────────────────┐
+               │         registry.py             │
+               │   AgentModelRegistry             │
+               │   _registry = {}  (in-memory)    │
+               │   agent_model_db  (SQLite)       │
+               │   agent_model_registry (singleton│
+               └──────────────────────────────────┘
+                              ▲
+                    written by │
+                              │
+               ┌──────────────┴──────────────────┐
+               │       agent_registry.py          │
+               │   POST /agents-settings/*/model  │
+               │   DELETE /agents-settings/*/model│
+               │   GET /agents-settings/models    │
+               └─────────────────────────────────┘
+```
+
+**Three things that prove the design is modular:**
+
+1. **Add Mistral** → create one file + add one block in `factory.py`. Zero other changes.
+2. **Swap from Claude to GPT** → one `POST` API call. Zero code changes. Zero restarts.
+3. **Test the workflow** → patch `llm_client.complete`. Test runs in milliseconds, no API key needed, no network.
+
+> **Interview summary:** "The LLM provider layer uses three design patterns together. `BaseLLMProvider` ABC defines the contract (Strategy Pattern). `get_provider()` decides which implementation to instantiate (Factory Pattern). `agent_model_registry` holds the runtime assignment of which model each agent currently uses. The result is that you can add providers, swap models, and write tests — all without touching existing code. This is the Open/Closed Principle from SOLID: open for extension, closed for modification."
