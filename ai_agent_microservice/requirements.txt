@@ -4,6 +4,7 @@ anaconda-auth @ file:///croot/anaconda-cloud-auth-split_1747863777058/work
 anaconda-cli-base @ file:///croot/anaconda-cli-base_1741369443553/work
 annotated-doc==0.0.4
 annotated-types @ file:///work/perseverance-python-buildout/croot/annotated-types_1728386958747/work
+anthropic==0.96.0
 anyio==4.13.0
 archspec @ file:///croot/archspec_1709217642129/work
 attrs==26.1.0
