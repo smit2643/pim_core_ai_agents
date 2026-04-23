@@ -3334,16 +3334,109 @@ Any developer already familiar with the LLM provider layer understands the loggi
 
 ---
 
-### Log Format
+### Log Schemas — Five Distinct Levels
 
-| Field | Type | Description |
+The logging system uses five distinct schemas. The first four (`ERROR`, `INFO`, `WARNING`, `DEBUG`) are standard Python log levels filtered by `LOG_LEVEL` in `.env`. The fifth (`AUDIT`) is a separate event that is **always emitted regardless of `LOG_LEVEL`** — it captures business-critical data that must never be accidentally silenced in production.
+
+---
+
+#### ERROR — emitted from `except` blocks only
+
+Carries the exception message exactly as raised. Only fires when something has gone wrong and was caught by a `try/except` block.
+
+```json
+{
+  "level":      "ERROR",
+  "timestamp":  "2026-04-23T09:25:33.882Z",
+  "request_id": "req-a1b2c3",
+  "class":      "LLMClient",
+  "method":     "generate",
+  "message":    "Anthropic API call failed — AuthenticationError: invalid API key"
+}
+```
+
+---
+
+#### INFO — emitted on successful method exit
+
+Confirms that a method completed without error. Includes the key outcome so you can see what happened without reading the full debug payload.
+
+```json
+{
+  "level":      "INFO",
+  "timestamp":  "2026-04-23T09:25:35.562Z",
+  "request_id": "req-a1b2c3",
+  "class":      "LLMClient",
+  "method":     "generate",
+  "message":    "LLM call completed successfully — model=claude-sonnet-4-6, latency_ms=1680"
+}
+```
+
+---
+
+#### WARNING — emitted when something worked but looks suspicious
+
+Fires when execution continued but a potential problem was detected — empty fields, slow responses, fallbacks triggered, missing config. Does not mean failure; means "watch this".
+
+```json
+{
+  "level":      "WARNING",
+  "timestamp":  "2026-04-23T09:25:33.001Z",
+  "request_id": "req-d4e5f6",
+  "class":      "BrandVoicePromptBuilder",
+  "method":     "build_prompt",
+  "message":    "productName is empty — LLM will have limited context for productID=705517"
+}
+```
+
+---
+
+#### DEBUG — emitted for verbose technical detail (dev/staging only)
+
+Captures internal state — raw payloads, token counts, parsed values — useful for diagnosing issues in development. Disabled in production by setting `LOG_LEVEL=INFO`.
+
+```json
+{
+  "level":        "DEBUG",
+  "timestamp":    "2026-04-23T09:25:33.445Z",
+  "request_id":   "req-a1b2c3",
+  "class":        "LLMClient",
+  "method":       "generate",
+  "message":      "Raw LLM payload dispatched",
+  "payload_tokens": 412,
+  "model":        "claude-sonnet-4-6"
+}
+```
+
+---
+
+#### AUDIT — always emitted, never filtered
+
+This is a separate structured event that records the business outcome of every agent action. It is emitted through a dedicated `AuditLogger` (not `StructuredLogger`) so it bypasses `LOG_LEVEL` and is always captured, even in production with `LOG_LEVEL=ERROR`. Inspired by the audit log design proposed by Smit Patel.
+
+```json
+{
+  "level":      "AUDIT",
+  "timestamp":  "2026-04-23T09:25:35.562Z",
+  "request_id": "req-a1b2c3",
+  "company_id": 12,
+  "agent_id":   1,
+  "action":     "generate",
+  "status":     "success",
+  "latency_ms": 1680,
+  "llm_model":  "claude-sonnet-4-6",
+  "created_at": "2026-04-23T09:25:33.882Z"
+}
+```
+
+**Why AUDIT is separate from DEBUG:**
+
+| | DEBUG | AUDIT |
 |---|---|---|
-| `level` | string | `INFO` / `DEBUG` / `WARNING` / `ERROR` |
-| `timestamp` | ISO 8601 | `2026-04-23T09:25:33.882Z` |
-| `request_id` | UUID string | Correlation ID — ties all log lines from one HTTP request together |
-| `class` | string | Which class emitted the log |
-| `method` | string | Which method emitted the log |
-| `message` | string | The log message |
+| Purpose | Technical diagnosis | Business audit trail |
+| Production? | Usually disabled (`LOG_LEVEL=INFO`) | Always on — never filtered |
+| Who reads it | Engineers debugging issues | Product, compliance, billing |
+| Fields | Raw payloads, token counts | company_id, action, status, latency |
 
 ---
 
@@ -3375,16 +3468,16 @@ AWS CloudWatch is the chosen backend because the microservice is deployed on AWS
 ### CloudWatch Logs Insights — Example Queries
 
 ```sql
+-- Trace one full request end-to-end (all 5 levels)
+fields level, timestamp, class, method, message
+| filter request_id = "req-a1b2c3"
+| sort timestamp asc
+
 -- All errors in the last hour
 fields timestamp, request_id, class, method, message
 | filter level = "ERROR"
 | sort timestamp desc
 | limit 50
-
--- Trace one full request end-to-end
-fields level, timestamp, class, method, message
-| filter request_id = "req-a1b2c3"
-| sort timestamp asc
 
 -- Find the most error-prone component
 fields class
@@ -3392,10 +3485,28 @@ fields class
 | stats count() as error_count by class
 | sort error_count desc
 
--- Slow LLM calls (warnings about latency)
+-- Warnings about suspicious inputs or slow responses
 fields timestamp, request_id, message
-| filter level = "WARNING" and class = "LLMClient"
+| filter level = "WARNING"
 | sort timestamp desc
+
+-- Audit: all actions for a specific company
+fields timestamp, request_id, action, status, latency_ms, llm_model
+| filter level = "AUDIT" and company_id = 12
+| sort timestamp desc
+
+-- Audit: average latency per agent action
+fields action, latency_ms
+| filter level = "AUDIT"
+| stats avg(latency_ms) as avg_ms, count() as calls by action
+| sort avg_ms desc
+
+-- Audit: failure rate per company
+fields company_id, status
+| filter level = "AUDIT"
+| stats count() as total,
+        sum(status = "failed") as failures by company_id
+| sort failures desc
 ```
 
 ---
@@ -3421,3 +3532,153 @@ Zero changes to `StructuredLogger`, zero changes to any agent or workflow. This 
 | **Context Variable** | `request_id` propagated via Python `contextvars` — no manual passing through call chains |
 
 > **Summary:** The logging layer is a direct structural mirror of the LLM provider layer. `BaseLogProvider` defines the contract, concrete providers adapt vendor SDKs to that contract, `LogProviderFactory` routes based on config, and `StructuredLogger` is the only surface the rest of the application touches. Adding a new cloud platform means adding one file and one line in the factory — nothing else changes.
+
+---
+
+### Implementation Plan
+
+**Goal:** 100% logging coverage — every method and function wrapped in `try/except`, all exceptions handled and logged, `INFO` on success, `AUDIT` on every agent action, `WARNING` on suspicious state.
+
+This plan is **implementation-only** — no architectural changes. The provider layer design above is the target state.
+
+---
+
+#### Phase 1 — Logging Infrastructure (no application code changes)
+
+Build the logging layer itself before touching any existing code.
+
+| Task | File to create | What it does |
+|---|---|---|
+| Abstract base | `pim_core/logging/base.py` | `BaseLogProvider` ABC with `get_handler()` and `get_log_group()` |
+| CloudWatch provider | `pim_core/logging/providers/cloudwatch.py` | `CloudWatchLogProvider` using `watchtower` |
+| GCP provider (stub) | `pim_core/logging/providers/gcp.py` | `GCPCloudLoggingProvider` — stub, ready for future wiring |
+| Azure provider (stub) | `pim_core/logging/providers/azure.py` | `AzureMonitorLogProvider` — stub, ready for future wiring |
+| Factory | `pim_core/logging/factory.py` | `LogProviderFactory.get_handler(LOG_PROVIDER)` |
+| Structured logger | `pim_core/logging/logger.py` | `StructuredLogger` singleton — attaches `request_id` from contextvar |
+| Audit logger | `pim_core/logging/audit.py` | `AuditLogger` — separate emitter, bypasses `LOG_LEVEL`, always fires |
+| Request middleware | `pim_core/logging/middleware.py` | FastAPI middleware — generates UUID `request_id` per request, injects into contextvar |
+| Config update | `pim_core/config.py` | Add `LOG_PROVIDER` and `LOG_LEVEL` to `Settings` |
+| Env update | `.env` | Add `LOG_PROVIDER=cloudwatch`, `LOG_LEVEL=INFO` |
+
+---
+
+#### Phase 2 — Try/Except Coverage (100% method coverage)
+
+Current state (from codebase audit): only 6 try/except blocks exist. Every file below needs coverage added.
+
+**`pim_core/llm/client.py` — `LLMClient`**
+
+| Method | Exception to catch | Log on except | Log on success |
+|---|---|---|---|
+| `complete()` | `Exception` (base — catches all provider errors) | `ERROR`: exception message | `INFO`: model, latency_ms |
+
+**`pim_core/llm/factory.py` — `LLMProviderFactory`**
+
+| Method | Exception to catch | Log on except | Log on success |
+|---|---|---|---|
+| `get_provider()` | `ValueError` (unknown model prefix) | `ERROR`: unknown model name | `DEBUG`: provider resolved |
+
+**`pim_core/llm/registry.py` — `AgentModelRegistry`**
+
+| Method | Exception to catch | Log on except | Log on success |
+|---|---|---|---|
+| `load()` | `Exception` (SQLite file missing / corrupt) | `ERROR`: db path, exception | `INFO`: registry loaded, N entries |
+| `get()` | `KeyError` | `WARNING`: agent not found, returning default | `DEBUG`: model returned |
+| `set()` | `Exception` (SQLite write failure) | `ERROR`: exception message | `INFO`: model assigned |
+
+**`pim_core/llm/providers/anthropic_provider.py` — `AnthropicProvider`**
+
+| Method | Exception to catch | Log on except | Log on success |
+|---|---|---|---|
+| `complete()` | `anthropic.APIError`, `Exception` | `ERROR`: status code, message | `DEBUG`: tokens used, latency |
+
+**`pim_core/llm/providers/openai_provider.py` — `OpenAIProvider`**
+
+| Method | Exception to catch | Log on except | Log on success |
+|---|---|---|---|
+| `complete()` | `openai.APIError`, `Exception` | `ERROR`: status code, message | `DEBUG`: tokens used, latency |
+
+**`pim_core/llm/providers/google_provider.py` — `GoogleProvider`**
+
+| Method | Exception to catch | Log on except | Log on success |
+|---|---|---|---|
+| `complete()` | `google.api_core.exceptions.GoogleAPIError`, `Exception` | `ERROR`: exception message | `DEBUG`: tokens used, latency |
+
+**`agents/product_description_generator/workflows/description_workflow.py`**
+
+| Method | Exception to catch | Log on except | Log on success |
+|---|---|---|---|
+| `generate_node()` | `JSONDecodeError`, `KeyError` (already exists — expand) | `ERROR`: exception + raw LLM output snippet | `INFO`: title length, description length |
+| `build_state()` (if exists) | `Exception` | `ERROR`: exception message | `DEBUG`: state keys populated |
+
+**`agents/product_description_generator/prompts/brand_voice.py`**
+
+| Method | Exception to catch | Log on except | Log on success |
+|---|---|---|---|
+| `get_system_prompt()` | `Exception` | `ERROR`: exception message | `DEBUG`: prompt token estimate |
+| `get_user_message()` | `Exception` | `ERROR`: exception message | `DEBUG`: product fields used |
+
+**`agents/product_description_generator/tools/generate_description.py`**
+
+| Method | Exception to catch | Log on except | Log on success |
+|---|---|---|---|
+| `generate_description()` | `Exception` | `ERROR`: exception message | `INFO`: tool invocation completed |
+
+**`agents/product_description_generator/routes/product_description_generator_api_route.py`**
+
+| Method | Exception to catch | Log on except | Log on success |
+|---|---|---|---|
+| `generate_description_from_pim()` | `Exception` (PIM adapt), `ValueError` (already exists — add logging) | `ERROR`: exception + request summary | `INFO`: HTTP 200 dispatched |
+
+**`agents/product_description_generator/routes/agent_registry.py`**
+
+| Method | Exception to catch | Log on except | Log on success |
+|---|---|---|---|
+| `set_agent_model()` | `ValueError` (already exists — add logging) | `ERROR`: invalid model name | `INFO`: model assignment recorded |
+| `get_agent_model()` | `Exception` | `ERROR`: exception message | `INFO`: model returned |
+| `list_models()` | `Exception` | `ERROR`: exception message | `INFO`: N models returned |
+| `reset_agent_model()` | `Exception` | `ERROR`: exception message | `INFO`: reset to default |
+
+---
+
+#### Phase 3 — AUDIT Event Emission
+
+Every agent action that completes (success or failure) must emit one AUDIT event. The AUDIT event is emitted at the end of the request lifecycle — after the workflow resolves.
+
+| Where to emit | Trigger | Fields |
+|---|---|---|
+| `generate_description_from_pim()` in API route | After workflow resolves | `company_id`, `agent_id`, `action=generate`, `status`, `latency_ms`, `llm_model` |
+| `generate_description()` MCP tool | After tool resolves | Same fields |
+
+---
+
+#### Phase 4 — Middleware Wiring
+
+Wire the `RequestIdMiddleware` into the FastAPI app startup so every request gets a `request_id` before hitting any route.
+
+| Task | File | Change |
+|---|---|---|
+| Register middleware | `agents/product_description_generator/main.py` | `app.add_middleware(RequestIdMiddleware)` |
+| Initialise logger | `main.py` startup | `StructuredLogger.initialise(LogProviderFactory.get_handler())` |
+
+---
+
+#### Coverage Checklist
+
+- [ ] `pim_core/logging/` — all 6 files created (base, 3 providers, factory, logger, audit, middleware)
+- [ ] `pim_core/config.py` — `LOG_PROVIDER`, `LOG_LEVEL` added
+- [ ] `LLMClient.complete()` — try/except + INFO/ERROR
+- [ ] `LLMProviderFactory.get_provider()` — try/except + ERROR/DEBUG
+- [ ] `AgentModelRegistry.load()` — try/except + INFO/ERROR
+- [ ] `AgentModelRegistry.get()` — try/except + WARNING/DEBUG
+- [ ] `AgentModelRegistry.set()` — try/except + INFO/ERROR
+- [ ] `AnthropicProvider.complete()` — try/except + DEBUG/ERROR
+- [ ] `OpenAIProvider.complete()` — try/except + DEBUG/ERROR
+- [ ] `GoogleProvider.complete()` — try/except + DEBUG/ERROR
+- [ ] `description_workflow.generate_node()` — expand existing try/except + INFO/ERROR
+- [ ] `brand_voice.get_system_prompt()` — try/except + DEBUG/ERROR
+- [ ] `brand_voice.get_user_message()` — try/except + DEBUG/ERROR
+- [ ] `generate_description tool` — try/except + INFO/ERROR
+- [ ] `api_route.generate_description_from_pim()` — expand existing + INFO/ERROR + AUDIT emit
+- [ ] `agent_registry` all 4 route handlers — try/except + INFO/ERROR
+- [ ] `main.py` — middleware registered, logger initialised
