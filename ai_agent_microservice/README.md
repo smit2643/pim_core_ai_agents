@@ -3258,9 +3258,9 @@ Logging is a cross-cutting concern — every component in the microservice (rout
 
 ### How It Works
 
-**Step 1 — Request arrives, middleware generates a `request_id`**
+**Step 1 — Request arrives, middleware generates `request_id` and loads `company_id`**
 
-Every incoming HTTP request is assigned a UUID (`request_id`) by a FastAPI middleware. This ID is stored in a Python `contextvar` — it propagates automatically to every function call downstream without being passed as an argument.
+Every incoming HTTP request is assigned a UUID (`request_id`) by a FastAPI middleware. The `company_id` from the authenticated request is also injected into the same Python `contextvar`. Both propagate automatically to every function call downstream — no manual passing required.
 
 **Step 2 — Components emit logs through `StructuredLogger`**
 
@@ -3279,13 +3279,17 @@ No component imports `watchtower`, `google-cloud-logging`, or any vendor SDK dir
 }
 ```
 
-**Step 4 — `LogProviderFactory` routes to the correct cloud backend**
+**Step 4 — `LogProviderFactory` resolves the correct handler for this company**
 
-`LogProviderFactory` reads `LOG_PROVIDER` from `.env` and returns the matching handler. The handler ships JSON lines to the configured cloud backend.
+`LogProviderFactory.get_handler(company_id)` checks its in-memory cache for a handler already created for that company. If found, it is returned instantly. If not, the factory reads `company_log_provider_config` from the database for that `company_id`, creates the appropriate provider handler, caches it, and returns it. If the company has no row in the table, the factory falls back to the global `LOG_PROVIDER` from `.env`.
 
-**Step 5 — Cloud backend stores, indexes, and makes logs queryable**
+**Step 5 — The handler ships the JSON line to the company's configured cloud backend**
 
-CloudWatch Logs Insights (or its equivalent on GCP/Azure) lets you run SQL-like queries directly on the JSON fields.
+Each company's logs land in their own isolated log group on their own cloud platform. Company 12 (CloudWatch) never sees Company 33's logs (GCP), and vice versa.
+
+**Step 6 — Cloud backend stores, indexes, and makes logs queryable**
+
+CloudWatch Logs Insights, GCP Log Explorer, or Azure Monitor each provide SQL-like querying on the JSON fields.
 
 ---
 
@@ -3309,7 +3313,13 @@ BaseLogProvider          (pim_core/logging/base.py)
             └── ships to: Azure Monitor / Log Analytics Workspace
 
 LogProviderFactory       (pim_core/logging/factory.py)
-  └── get_handler(LOG_PROVIDER) → logging.Handler
+  ├── _cache: dict[company_id → handler_instance]
+  ├── get_handler(company_id) → logging.Handler
+  │     ├── cache hit  → return cached handler instantly
+  │     ├── cache miss → read company_log_provider_config from DB
+  │     │                 → create provider → cache → return
+  │     └── no DB row  → fall back to LOG_PROVIDER from .env
+  └── refresh(company_id)  ← called when operator updates via API
 
 StructuredLogger         (pim_core/logging/logger.py)
   └── Single entry point — application code only ever touches this
@@ -3331,6 +3341,76 @@ StructuredLogger         (pim_core/logging/logger.py)
 | `CLAUDE_MODEL=claude-sonnet-4-6` | `LOG_PROVIDER=cloudwatch` |
 
 Any developer already familiar with the LLM provider layer understands the logging layer immediately — same patterns, same structure.
+
+The second parallel goes deeper — just as `AgentModelRegistry` lets an operator assign a different LLM model per agent via API, `LogProviderFactory` (backed by `company_log_provider_config`) lets an operator assign a different cloud log provider per company via API. The mechanism is identical:
+
+| `AgentModelRegistry` | `LogProviderFactory` |
+|---|---|
+| Reads model assignments from SQLite on startup | Reads provider config from `company_log_provider_config` on startup |
+| `{agent_name: model_string}` in-memory cache | `{company_id: handler_instance}` in-memory cache |
+| Falls back to `CLAUDE_MODEL` env var | Falls back to `LOG_PROVIDER` env var |
+| Updated via `POST /agents-settings/{name}/model` | Updated via `POST /log-settings/{company_id}/provider` |
+| Cache entry refreshed on each `set` call | Cache entry refreshed on each `set` call |
+| Zero DB cost per LLM call after first load | Zero DB cost per log line after first load |
+
+---
+
+### Per-Company Log Provider Routing
+
+The `company_log_provider_config` database table drives which cloud backend receives each company's logs at runtime. This is how it all connects:
+
+```
+Operator calls:
+  POST /log-settings/12/provider
+  { "log_provider": "cloudwatch", "log_group_name": "/pim-ai/company-12",
+    "region": "eu-west-1", "credentials_secret_ref": "arn:aws:secretsmanager:..." }
+        │
+        ▼
+  Write row to company_log_provider_config WHERE company_id=12
+        │
+        ▼
+  LogProviderFactory.refresh(company_id=12)
+  └── fetches credentials from AWS Secrets Manager using credentials_secret_ref
+  └── creates CloudWatchLogProvider(log_group="/pim-ai/company-12", region="eu-west-1")
+  └── stores handler in _cache[12]
+
+─────────────────────────────────────────────────────
+Next request arrives for company_id=12:
+─────────────────────────────────────────────────────
+  Middleware injects company_id=12 into contextvar
+        │
+        ▼
+  StructuredLogger.info("LLM call completed...")
+        │
+        ▼
+  LogProviderFactory.get_handler(company_id=12)
+  └── cache hit → returns CloudWatchLogProvider handler instantly
+        │
+        ▼
+  Log line → AWS CloudWatch /pim-ai/company-12
+
+─────────────────────────────────────────────────────
+Simultaneously, request for company_id=33:
+─────────────────────────────────────────────────────
+  LogProviderFactory.get_handler(company_id=33)
+  └── cache hit → returns GCPCloudLoggingProvider handler
+        │
+        ▼
+  Log line → GCP Cloud Logging (company 33's project)
+
+─────────────────────────────────────────────────────
+Request for company_id=99 (no DB row — new company):
+─────────────────────────────────────────────────────
+  LogProviderFactory.get_handler(company_id=99)
+  └── no cache, no DB row → falls back to LOG_PROVIDER from .env
+        │
+        ▼
+  Log line → default cloud backend (e.g. CloudWatch)
+```
+
+**The result:** Each company's logs land in their own isolated log group on their own cloud platform. A company on AWS never shares a log group with a company on GCP. Compliance, billing, and access control all stay cleanly separated per customer.
+
+**The `company_log_provider_config` table schema** is documented in `project_task_list/db_schema_design_proposal/database_schema_design_proposal.xlsx`.
 
 ---
 
