@@ -3,8 +3,8 @@ from __future__ import annotations
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from agents.auto_classifier.config import settings
 from agents.auto_classifier.db.models import ClassificationResult
+from pim_core.llm.registry import agent_model_registry
 from agents.auto_classifier.schemas.response import ClassifyResponse
 from agents.auto_classifier.workflows.classification_workflow import classification_graph
 
@@ -38,13 +38,15 @@ async def classify_product(
     if state.get("error"):
         raise ValueError(state["error"])
 
+    model_used = agent_model_registry.get("auto_classifier")
+
     db_result = ClassificationResult(
         product_description=product_description[:500],
         category_path=state["category_path"],
         category_id=state.get("category_id"),
         confidence=state["confidence"],
         method=state["method"],
-        model_used=settings.classifier_model,
+        model_used=model_used,
     )
     session.add(db_result)
     await session.commit()
@@ -64,5 +66,5 @@ async def classify_product(
         level3=parts[2] if len(parts) > 2 else None,
         confidence=state["confidence"],
         method=state["method"],
-        model_used=settings.classifier_model,
+        model_used=model_used,
     )

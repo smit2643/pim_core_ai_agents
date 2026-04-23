@@ -17,6 +17,7 @@ from agents.auto_classifier.tools.category_search import search_categories
 from agents.auto_classifier.tools.embed_product import embed_text
 from agents.auto_classifier.tools.web_search import search_wikipedia
 from pim_core.llm.client import llm_client
+from pim_core.llm.registry import agent_model_registry
 
 logger = structlog.get_logger()
 
@@ -93,7 +94,7 @@ async def llm_node(state: ClassificationState) -> dict:
         raw = await llm_client.complete(
             system=system,
             messages=[{"role": "user", "content": user}],
-            model=settings.classifier_model,
+            model=agent_model_registry.get(AGENT_NAME),
             max_tokens=256,
         )
         raw_clean = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()

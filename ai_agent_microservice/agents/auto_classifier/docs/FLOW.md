@@ -78,9 +78,9 @@ Reads `top_score` (best candidate's score) and assigns a path:
 
 | Score | Path |
 |-------|------|
-| ≥ 0.55 | **A** — high confidence, skip web search |
-| 0.45 – 0.54 | **B** — medium confidence, add Wikipedia context |
-| < 0.45 | **C** — low confidence, Wikipedia only, generate new category |
+| ≥ 0.60 | **A** — high confidence, skip web search |
+| 0.35 – 0.59 | **B** — medium confidence, add Wikipedia context |
+| < 0.35 | **C** — low confidence, Wikipedia only, generate new category |
 
 ### Node 4 — web_search (Path B and C only)
 
@@ -114,7 +114,7 @@ Embeds the LLM-generated `category_path`, assigns a random negative `category_id
 
 | Variable | Default | Meaning |
 |----------|---------|---------|
-| `high_confidence_threshold` | `0.55` | Path A cutoff |
-| `low_confidence_threshold` | `0.45` | Path B / C boundary |
+| `high_confidence_threshold` | `0.60` | Path A cutoff |
+| `low_confidence_threshold` | `0.35` | Path B / C boundary |
 
-Calibrated for cross-domain product-description → category-path embedding similarity with `text-embedding-3-small`.
+Calibrated for cross-domain product-description → category-path embedding similarity with `text-embedding-3-small`. Wide gap (0.25) between thresholds prevents fragile single-point routing decisions.

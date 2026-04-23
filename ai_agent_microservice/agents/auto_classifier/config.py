@@ -17,8 +17,8 @@ class ClassifierSettings(BaseSettings):
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/auto_classifier"
 
     # 3-path confidence thresholds (calibrated for product-description → category-path cross-domain embeddings)
-    high_confidence_threshold: float = 0.55   # Path A: top-5 direct to LLM
-    low_confidence_threshold: float = 0.45    # Path B: web+top-5; below = Path C
+    high_confidence_threshold: float = 0.60   # Path A: top-5 direct to LLM
+    low_confidence_threshold: float = 0.35    # Path B: web+top-5; below = Path C
 
     log_level: str = "INFO"
 

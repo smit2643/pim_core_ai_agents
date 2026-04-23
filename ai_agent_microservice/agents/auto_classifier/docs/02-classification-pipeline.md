@@ -24,7 +24,7 @@ class ClassificationState(TypedDict):
 
 ---
 
-## Path A — High Confidence (score ≥ 0.55)
+## Path A — High Confidence (score ≥ 0.60)
 
 ```
 embed → search → route → llm → END
@@ -40,7 +40,7 @@ embed → search → route → llm → END
 
 ---
 
-## Path B — Medium Confidence (0.45 ≤ score < 0.55)
+## Path B — Medium Confidence (0.35 ≤ score < 0.60)
 
 ```
 embed → search → route → web_search → llm → END
@@ -55,7 +55,7 @@ embed → search → route → web_search → llm → END
 
 ---
 
-## Path C — Low Confidence (score < 0.45)
+## Path C — Low Confidence (score < 0.35)
 
 ```
 embed → search → route → web_search → llm → save_category → END
