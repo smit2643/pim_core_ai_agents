@@ -22,6 +22,7 @@ A production-ready FastAPI microservice that powers AI agents for a Product Info
 14. [Deep Dive — LangGraph, FastMCP, and How Everything Works Together](#14-deep-dive--langgraph-fastmcp-and-how-everything-works-together)
 15. [Deep Dive — The LLM Provider Layer (base, providers, client, factory, registry)](#15-deep-dive--the-llm-provider-layer-pim_corellm)
 16. [Deep Dive — Prompts, Routes, Tools, and Workflows](#16-deep-dive--prompts-routes-tools-and-workflows)
+17. [Logging Architecture (CloudWatch + Provider Pattern)](#17-logging-architecture-cloudwatch--provider-pattern)
 
 ---
 
@@ -719,6 +720,47 @@ Configuration (.env → pim_core/config.py → Settings singleton):
   OPENAI_API_KEY    ──► OpenAIProvider.__init__()   (checked lazily)
   GOOGLE_API_KEY    ──► GoogleProvider.__init__()   (checked lazily)
   CLAUDE_MODEL      ──► AgentModelRegistry.get() fallback
+  LOG_PROVIDER      ──► LogProviderFactory.get_handler()  (cloudwatch | gcp | azure)
+
+
+Cross-Cutting: Structured Logging (every component emits JSON log lines)
+
+  FastAPI Middleware
+  └── generates request_id (UUID per request)
+  └── injects into Python contextvars — available to all downstream code
+                │
+                ▼
+  Any component: Agent / Workflow / LLMClient / Registry / Routes
+                │
+                │  StructuredLogger.info() / .error() / .warning() / .debug()
+                ▼
+  pim_core/logging/logger.py  ← StructuredLogger (single entry point)
+  └── attaches: level, timestamp, request_id, class, method, message
+  └── python-json-logger → formats as JSON line
+                │
+                ▼
+  pim_core/logging/factory.py  ← LogProviderFactory
+  reads LOG_PROVIDER from .env
+                │
+      ┌─────────┼──────────┐
+      │         │          │
+      ▼         ▼          ▼
+  cloudwatch   gcp       azure
+      │         │          │
+      ▼         ▼          ▼
+  CloudWatch  GCP Cloud  Azure
+  LogProvider Logging    Monitor
+  (watchtower)(google-   (azure-monitor-
+              cloud-     opentelemetry)
+              logging)
+      │         │          │
+      └─────────┴──────────┘
+                │
+                ▼
+     Cloud Log Aggregation Backend
+     └── SQL-like queries (CloudWatch Insights / GCP Log Explorer / Azure Monitor)
+     └── Metric filters + Alarms on ERROR rate
+     └── Retention policy → cost control
 ```
 
 ---
@@ -3203,3 +3245,179 @@ The patch replaces `llm_client.complete` at the exact import location where the 
 3. **Test the workflow** → patch `llm_client.complete`. Test runs in milliseconds, no API key needed, no network.
 
 > **Interview summary:** "The LLM provider layer uses three design patterns together. `BaseLLMProvider` ABC defines the contract (Strategy Pattern). `get_provider()` decides which implementation to instantiate (Factory Pattern). `agent_model_registry` holds the runtime assignment of which model each agent currently uses. The result is that you can add providers, swap models, and write tests — all without touching existing code. This is the Open/Closed Principle from SOLID: open for extension, closed for modification."
+
+---
+
+## 17. Logging Architecture (CloudWatch + Provider Pattern)
+
+### Overview
+
+Logging is a cross-cutting concern — every component in the microservice (routes, agent, workflow, LLM client, registry) emits structured log lines. The logging layer is built using the **same provider-agnostic pattern as the LLM layer**, so switching from AWS CloudWatch to GCP Cloud Logging or Azure Monitor requires changing a single environment variable and zero application code.
+
+---
+
+### How It Works
+
+**Step 1 — Request arrives, middleware generates a `request_id`**
+
+Every incoming HTTP request is assigned a UUID (`request_id`) by a FastAPI middleware. This ID is stored in a Python `contextvar` — it propagates automatically to every function call downstream without being passed as an argument.
+
+**Step 2 — Components emit logs through `StructuredLogger`**
+
+No component imports `watchtower`, `google-cloud-logging`, or any vendor SDK directly. Every component calls `StructuredLogger.info()`, `.debug()`, `.warning()`, or `.error()`. `StructuredLogger` is the **single entry point** for all logging — identical to how `LLMClient` is the single entry point for all LLM calls.
+
+**Step 3 — `python-json-logger` formats each line as JSON**
+
+```json
+{
+  "level":      "ERROR",
+  "timestamp":  "2026-04-23T09:25:33.882Z",
+  "request_id": "req-a1b2c3",
+  "class":      "LLMClient",
+  "method":     "generate",
+  "message":    "Anthropic API call failed — AuthenticationError: invalid API key"
+}
+```
+
+**Step 4 — `LogProviderFactory` routes to the correct cloud backend**
+
+`LogProviderFactory` reads `LOG_PROVIDER` from `.env` and returns the matching handler. The handler ships JSON lines to the configured cloud backend.
+
+**Step 5 — Cloud backend stores, indexes, and makes logs queryable**
+
+CloudWatch Logs Insights (or its equivalent on GCP/Azure) lets you run SQL-like queries directly on the JSON fields.
+
+---
+
+### Provider Layer Architecture
+
+```
+BaseLogProvider          (pim_core/logging/base.py)
+  ├── get_handler() → logging.Handler   abstract
+  └── get_log_group() → str             abstract
+        │
+        ├── CloudWatchLogProvider      (pim_core/logging/providers/cloudwatch.py)
+        │   └── watchtower.CloudWatchLogHandler
+        │   └── ships to: AWS CloudWatch Log Group
+        │
+        ├── GCPCloudLoggingProvider    (pim_core/logging/providers/gcp.py)
+        │   └── google.cloud.logging.handlers.CloudLoggingHandler
+        │   └── ships to: GCP Cloud Logging
+        │
+        └── AzureMonitorLogProvider    (pim_core/logging/providers/azure.py)
+            └── azure.monitor.opentelemetry AzureLogHandler
+            └── ships to: Azure Monitor / Log Analytics Workspace
+
+LogProviderFactory       (pim_core/logging/factory.py)
+  └── get_handler(LOG_PROVIDER) → logging.Handler
+
+StructuredLogger         (pim_core/logging/logger.py)
+  └── Single entry point — application code only ever touches this
+  └── Attaches request_id from contextvar on every log record
+```
+
+---
+
+### Parallel With the LLM Provider Layer
+
+| LLM Layer | Logging Layer |
+|---|---|
+| `BaseLLMProvider` | `BaseLogProvider` |
+| `AnthropicProvider` | `CloudWatchLogProvider` |
+| `OpenAIProvider` | `GCPCloudLoggingProvider` |
+| `GoogleProvider` | `AzureMonitorLogProvider` |
+| `LLMProviderFactory` | `LogProviderFactory` |
+| `LLMClient` | `StructuredLogger` |
+| `CLAUDE_MODEL=claude-sonnet-4-6` | `LOG_PROVIDER=cloudwatch` |
+
+Any developer already familiar with the LLM provider layer understands the logging layer immediately — same patterns, same structure.
+
+---
+
+### Log Format
+
+| Field | Type | Description |
+|---|---|---|
+| `level` | string | `INFO` / `DEBUG` / `WARNING` / `ERROR` |
+| `timestamp` | ISO 8601 | `2026-04-23T09:25:33.882Z` |
+| `request_id` | UUID string | Correlation ID — ties all log lines from one HTTP request together |
+| `class` | string | Which class emitted the log |
+| `method` | string | Which method emitted the log |
+| `message` | string | The log message |
+
+---
+
+### Why CloudWatch
+
+AWS CloudWatch is the chosen backend because the microservice is deployed on AWS. It requires zero additional infrastructure — logs flow from stdout to CloudWatch automatically via the `watchtower` handler.
+
+**Pros:**
+
+| Benefit | Detail |
+|---|---|
+| Zero infrastructure | No log server to run or maintain |
+| Native AWS integration | Alarms, dashboards, metric filters built in |
+| CloudWatch Logs Insights | SQL-like queries directly on JSON log fields |
+| Retention policies | Auto-delete after N days — directly controls storage cost |
+| Works on EC2, ECS, Lambda | Same setup across all AWS compute options |
+
+**Cons:**
+
+| Limitation | Detail |
+|---|---|
+| Cost grows with volume | Charged per GB ingested + stored + queried |
+| Vendor lock-in | Tied to AWS — reason this layer uses a provider pattern |
+| Insights learning curve | CloudWatch Insights query syntax is not standard SQL |
+| Cold query latency | Large log groups can be slow to query |
+
+---
+
+### CloudWatch Logs Insights — Example Queries
+
+```sql
+-- All errors in the last hour
+fields timestamp, request_id, class, method, message
+| filter level = "ERROR"
+| sort timestamp desc
+| limit 50
+
+-- Trace one full request end-to-end
+fields level, timestamp, class, method, message
+| filter request_id = "req-a1b2c3"
+| sort timestamp asc
+
+-- Find the most error-prone component
+fields class
+| filter level = "ERROR"
+| stats count() as error_count by class
+| sort error_count desc
+
+-- Slow LLM calls (warnings about latency)
+fields timestamp, request_id, message
+| filter level = "WARNING" and class = "LLMClient"
+| sort timestamp desc
+```
+
+---
+
+### Adding a New Log Provider (e.g. Datadog)
+
+1. Create `pim_core/logging/providers/datadog.py` — extend `BaseLogProvider`, implement `get_handler()`
+2. Add `"datadog"` case to `LogProviderFactory`
+3. Set `LOG_PROVIDER=datadog` in `.env`
+
+Zero changes to `StructuredLogger`, zero changes to any agent or workflow. This is the **Open/Closed Principle** — open for extension, closed for modification.
+
+---
+
+### Design Patterns
+
+| Pattern | Where Applied |
+|---|---|
+| **Strategy** | `BaseLogProvider` + concrete providers — swap log backend at runtime |
+| **Factory** | `LogProviderFactory` — instantiates the correct provider from config |
+| **Adapter** | Each provider adapts its vendor SDK to the same `get_handler()` interface |
+| **Singleton** | `StructuredLogger` — one shared logger instance across the entire app |
+| **Context Variable** | `request_id` propagated via Python `contextvars` — no manual passing through call chains |
+
+> **Summary:** The logging layer is a direct structural mirror of the LLM provider layer. `BaseLogProvider` defines the contract, concrete providers adapt vendor SDKs to that contract, `LogProviderFactory` routes based on config, and `StructuredLogger` is the only surface the rest of the application touches. Adding a new cloud platform means adding one file and one line in the factory — nothing else changes.
