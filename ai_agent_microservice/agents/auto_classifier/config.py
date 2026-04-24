@@ -6,9 +6,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class ClassifierSettings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    # LLM — swap model name to change provider (pim_core handles routing)
-    classifier_model: str = "gpt-4o"
-
     # Embedding — swap provider/model without changing any other code
     embedding_provider: str = "openai"
     embedding_model: str = "text-embedding-3-small"

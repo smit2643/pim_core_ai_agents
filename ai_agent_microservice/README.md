@@ -8,6 +8,7 @@ A production-ready FastAPI microservice that powers AI agents for a Product Info
 
 1. [Python Version and Dependencies](#1-python-version-and-dependencies)
 2. [Installation](#2-installation)
+   - [Keeping `requirements.txt` clean — venv-only freeze](#keeping-requirementstxt-clean--venv-only-freeze)
 3. [Configuration](#3-configuration)
 4. [Running the Project](#4-running-the-project)
 5. [API Reference](#5-api-reference)
@@ -149,6 +150,106 @@ ENVIRONMENT=development
 LOG_LEVEL=INFO
 CLAUDE_MODEL=claude-sonnet-4-6
 ```
+
+### Keeping `requirements.txt` clean — venv-only freeze
+
+#### Why the problem happens
+
+If you run `pip freeze` while your **Anaconda / conda base environment is active**, pip reports every package that conda has ever installed — including conda's own infrastructure packages and entries with non-portable `@ file:///croot/...` paths:
+
+```
+conda @ file:///croot/conda_1754469510968/work/conda-src
+anaconda-auth @ file:///croot/anaconda-cloud-auth-split_1747863777058/work
+```
+
+These paths only exist on your machine. Anyone else who runs `pip install -r requirements.txt` will get an error. **You do not need to remove conda** — you just need to always run `pip freeze` through the project venv, not through conda.
+
+#### How it works — why the venv blocks conda packages
+
+The venv at `ai_agent_microservice/venv/` was created with:
+
+```
+include-system-site-packages = false
+```
+
+This means Python running inside the venv cannot see anything in conda's `site-packages`. When you run `pip freeze` through the venv, the output is limited to packages in `venv/lib/python3.13/site-packages/` only — conda is completely invisible.
+
+#### How to spot a polluted freeze
+
+```bash
+grep "@ file:///" requirements.txt
+```
+
+If that prints anything, the file was frozen from outside the venv and needs to be regenerated.
+
+#### Normal workflow — adding a new package
+
+Always do this from inside `ai_agent_microservice/`:
+
+```bash
+# Step 1 — activate the venv
+source venv/bin/activate
+
+# Step 2 — install the new package
+pip install <package-name>
+
+# Step 3 — freeze only venv packages back to requirements.txt
+pip freeze > requirements.txt
+
+# Step 4 — verify clean
+grep "@ file:///" requirements.txt   # must print nothing
+```
+
+#### First-time setup on a new machine
+
+```bash
+cd ai_agent_microservice/
+
+# Create the venv using the Python you want (conda env is fine as the base)
+python3 -m venv venv
+
+# Activate it
+source venv/bin/activate
+
+# Install everything
+pip install -r requirements.txt
+```
+
+#### Recovering from a broken pip shebang
+
+If `pip list` shows only `pip` (or pip throws a "bad interpreter" error), the pip binary inside the venv has a broken shebang. This happens when the venv's Python symlink was moved or the venv was created from a path that no longer exists.
+
+**Fix — reinstall pip through the venv's python directly:**
+
+```bash
+# Run from ai_agent_microservice/
+# venv/bin/python3 is a symlink — it still points to the correct interpreter
+venv/bin/python3 -m pip install --upgrade pip
+```
+
+This rewrites `venv/bin/pip` with the correct shebang. After this, `source venv/bin/activate && pip list` will show all installed packages correctly.
+
+**Then regenerate `requirements.txt`:**
+
+```bash
+venv/bin/python3 -m pip freeze > requirements.txt
+grep "@ file:///" requirements.txt   # must print nothing
+```
+
+#### Why `venv/` is gitignored
+
+`venv/` is listed in `.gitignore`. It is a local build artefact; each developer regenerates it from `requirements.txt`. Never commit the `venv/` directory itself.
+
+#### Quick reference
+
+| Situation | Command |
+|---|---|
+| Activate venv | `source venv/bin/activate` |
+| Add a dependency | `pip install <pkg> && pip freeze > requirements.txt` |
+| Regenerate requirements.txt | `pip freeze > requirements.txt` |
+| Verify clean (no conda paths) | `grep "@ file:///" requirements.txt` — must print nothing |
+| Fix broken pip shebang | `venv/bin/python3 -m pip install --upgrade pip` |
+| Full rebuild from scratch | `rm -rf venv && python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt` |
 
 ---
 

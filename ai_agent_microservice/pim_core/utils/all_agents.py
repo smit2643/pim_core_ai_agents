@@ -16,6 +16,7 @@ class AllAgents(str, Enum):
     3. Use AllAgents.<AGENT_NAME> everywhere in that agent's code
     """
     PRODUCT_DESCRIPTION_GENERATOR = "product_description_generator"
+    AUTO_CLASSIFIER = "auto_classifier"
 
     # Future agents — uncomment and implement when ready:
     # CATALOG = "catalog"
