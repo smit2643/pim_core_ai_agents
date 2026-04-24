@@ -8,7 +8,7 @@ from agents.auto_classifier.schemas.request import ClassifyRequest
 from agents.auto_classifier.schemas.response import ClassifyResponse
 from agents.auto_classifier.tools.classify_product import classify_product
 
-router = APIRouter(prefix="/classify", tags=["classify"])
+router = APIRouter(prefix="/classify", tags=["agents"])
 
 
 @router.post("", response_model=ClassifyResponse)
